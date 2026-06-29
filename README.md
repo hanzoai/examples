@@ -1,3 +1,5 @@
+<p align="center"><img src=".github/hero.svg" alt="examples" width="880"></p>
+
 # Dokploy Examples
 
 ---
