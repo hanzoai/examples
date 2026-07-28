@@ -1,0 +1,128 @@
+<!--hz {"title":"Console","archetype":"SaaS dashboard","creator":"apps","desc":"Product console: usage against plan limits with projections, invoice history, API keys with reveal/rotate, team seats and a webhook log.","nav":[["#/","Usage"],["#/billing","Billing"],["#/keys","API keys"],["#/team","Team"],["#/webhooks","Webhooks"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Console</h1>
+  <span class="tag acc">Team plan</span><span class="tag" id="cycle"></span>
+  <span class="spacer"></span><button class="p" id="upgrade">Upgrade</button>
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:16px">Usage, invoices and keys shown here are synthetic. Nothing is billed and no key here authorises anything.</p>
+<script>
+const {h,fill,$,store,rng,range,fmt,area,bars,donut,spark,grid,avatar,modal,toast,submit,route,uid} = hz;
+const r = rng(1234);
+const view = $('#view');
+const DAYS = 30;
+const usage = {
+  'API requests': {used: 1_842_300, limit: 3_000_000, series: range(DAYS,()=>Math.round(40000+r()*38000))},
+  'Deploys': {used: 412, limit: 1000, series: range(DAYS,()=>Math.round(6+r()*20))},
+  'Bandwidth (GB)': {used: 268, limit: 500, series: range(DAYS,()=>Math.round(4+r()*14))},
+  'Base records': {used: 74_120, limit: 250_000, series: range(DAYS,()=>Math.round(1200+r()*2200))},
+};
+const day = new Date().getDate();
+$('#cycle').textContent = 'Day '+day+' of 30';
+const keys = store('console.keys', [
+  {id:uid(), name:'production', prefix:'hz_live_', tail:'8f2a', created:Date.now()-64*864e5, lastUsed:Date.now()-2*36e5, scopes:['deploy','read']},
+  {id:uid(), name:'ci', prefix:'hz_live_', tail:'41cd', created:Date.now()-14*864e5, lastUsed:Date.now()-40*6e4, scopes:['deploy']},
+]);
+const seats = store('console.seats', range(6,i=>({id:uid(),
+  name:['Ada L','Grace H','Ken T','Barbara L','Linus T','Radia P'][i],
+  role:['owner','admin','developer','developer','billing','viewer'][i],
+  seen:Date.now()-Math.round(r()*20)*864e5})));
+
+function usageView(){
+  fill(view,
+    h('div.grid.k4',{style:{marginBottom:'16px'}}, Object.entries(usage).map(([k,u])=>{
+      const pct = u.used/u.limit*100, proj = u.used/day*30;
+      return h('div.stat',
+        h('div.k',k), h('div.v',fmt.n(u.used)),
+        h('div.bar',{style:{margin:'8px 0 5px'}},h('i',{style:{width:Math.min(100,pct)+'%',
+          background: pct>85?'var(--bad)':pct>65?'var(--warn)':'var(--acc)'}})),
+        h('div.row',h('span.small.muted',pct.toFixed(0)+'% of '+fmt.n(u.limit)),
+          h('span.spacer'), h('span.small'+(proj>u.limit?'.down':'.muted'),'proj '+fmt.n(proj))));
+    })),
+    h('div.split.r',
+      h('div.pane',h('header','API requests · last 30 days'),h('div.body',
+        area(usage['API requests'].series, range(DAYS,i=>fmt.date(Date.now()-(DAYS-1-i)*864e5))))),
+      h('div.col',
+        h('div.pane',h('header','Usage mix'),h('div.body',
+          donut(Object.entries(usage).map(([k,u])=>({k, v:u.used/u.limit}))))),
+        h('div.pane',h('header','Top endpoints'),h('div.body',
+          bars([{k:'POST /v1/sites/deploy',v:412},{k:'GET /v1/sites',v:2840},
+            {k:'POST /v1/base/.../records',v:74120},{k:'GET /v1/projects',v:1210}]
+            .map(x=>({...x,f:fmt.n(x.v)}))))))));
+}
+function billing(){
+  const invoices = range(6,i=>({id:'INV-2026-'+String(120-i).padStart(4,'0'),
+    at: Date.now()-i*30*864e5, amount: 29*6 + Math.round(r()*40), state: i?'paid':'open'}));
+  fill(view, h('div.split.r',
+    h('div.pane',h('header','Invoices'), grid([
+      {k:'id',t:'Invoice',cell:x=>h('span.mono.small',x.id)},
+      {k:'at',t:'Date',cell:x=>fmt.date(x.at)},
+      {k:'amount',t:'Amount',num:true,cell:x=>fmt.money(x.amount)},
+      {k:'state',t:'State',cell:x=>h('span.tag '+(x.state==='paid'?'ok':'warn'),x.state)},
+    ], invoices, {noSearch:true})),
+    h('div.col',
+      h('div.pane',h('header','This cycle'),h('div.body',
+        h('div.row',{style:{justifyContent:'space-between'}},h('span.small.muted','Seats × 6'),h('span.num',fmt.money(174))),
+        h('div.row',{style:{justifyContent:'space-between'}},h('span.small.muted','Overage'),h('span.num',fmt.money(0))),
+        h('hr'), h('div.row',{style:{justifyContent:'space-between'}},h('span.b','Due 1 Aug'),h('span.b.num',fmt.money(174))),
+        h('button.p',{style:{width:'100%',marginTop:'10px'},onclick:()=>toast('Demonstration only — no payment method is collected')},'Manage payment'))),
+      h('div.pane',h('header','Spend, 6 months'),h('div.body',
+        spark(invoices.map(i=>i.amount).reverse(), '#5b8cff', 300, 70))))));
+}
+function keysView(){
+  fill(view, h('div.pane',
+    h('header','API keys', h('span.spacer'),
+      h('button.p.sm',{onclick:()=>{
+        const k={id:uid(),name:'new-key',prefix:'hz_live_',tail:Math.random().toString(16).slice(2,6),
+          created:Date.now(),lastUsed:null,scopes:['read']};
+        keys.set(v=>[...v,k]); keysView(); toast('Key created — copy it now, it is shown once');
+        submit('console.key',{name:k.name}).catch(()=>{}); }},'+ Create key')),
+    h('table',h('thead',h('tr',h('th','Name'),h('th','Key'),h('th','Scopes'),h('th','Created'),h('th','Last used'),h('th',''))),
+      h('tbody', keys.get().map(k=>{
+        const cell = h('td', h('span.mono.small', k.prefix+'••••••••'+k.tail));
+        return h('tr', h('td.b',k.name), cell,
+          h('td', k.scopes.map(s=>h('span.tag',s))),
+          h('td.small.muted',fmt.date(k.created)),
+          h('td.small.muted', k.lastUsed? fmt.ago(k.lastUsed):'never'),
+          h('td', h('div.row',{style:{gap:'4px'}},
+            h('button.sm',{onclick:()=>{ cell.firstChild.textContent = k.prefix+'demo'+'0'.repeat(20)+k.tail;
+              toast('This is a placeholder value — it authorises nothing'); }},'Reveal'),
+            h('button.sm',{onclick:()=>{ keys.set(v=>v.map(x=>x.id===k.id?{...x,tail:Math.random().toString(16).slice(2,6),created:Date.now()}:x));
+              keysView(); toast('Rotated'); }},'Rotate'),
+            h('button.g.sm',{onclick:()=>{keys.set(v=>v.filter(x=>x.id!==k.id));keysView();}},'Revoke'))));
+      }))),
+    h('div.body',h('p.hz-note',{style:{margin:0}},'These are display-only placeholders in the shape of a key. No real credential is generated, stored or revealed by this page.'))));
+}
+function team(){
+  fill(view, h('div.split.r',
+    h('div.pane',h('header','Seats · '+seats.get().length+' of 10'), grid([
+      {k:'name',t:'Member',cell:x=>h('div.row',{style:{gap:'8px'}},avatar(x.name,26),h('span.b',x.name))},
+      {k:'role',t:'Role',cell:x=>h('span.tag'+(x.role==='owner'?' acc':''),x.role)},
+      {k:'seen',t:'Last active',num:true,cell:x=>h('span.small.muted',fmt.ago(x.seen))},
+    ], seats.get(), {placeholder:'Search members…'})),
+    h('div.pane',h('header','Seat usage'),h('div.body',
+      donut(['owner','admin','developer','billing','viewer']
+        .map(r0=>({k:r0, v:seats.get().filter(s=>s.role===r0).length})).filter(x=>x.v)),
+      h('div.bar',{style:{marginTop:'12px'}},h('i',{style:{width:(seats.get().length/10*100)+'%'}})),
+      h('p.small.muted',{style:{marginTop:'6px'}},seats.get().length+' of 10 seats used on the Team plan.')))));
+}
+function webhooks(){
+  const evs = range(14,i=>({id:'evt_'+Math.random().toString(16).slice(2,10),
+    type: ['site.deployed','release.activated','domain.verified','member.invited'][i%4],
+    at: Date.now()-i*Math.round(20+r()*200)*6e4,
+    status: r()>0.86? 500 : 200, ms: Math.round(30+r()*400)}));
+  fill(view, h('div.pane', h('header','Recent deliveries', h('span.spacer'),
+      h('span.small.muted','endpoint https://example.invalid/hooks')),
+    grid([
+      {k:'id',t:'Event',cell:x=>h('span.mono.small',x.id)},
+      {k:'type',t:'Type',cell:x=>h('span.tag.acc',x.type)},
+      {k:'status',t:'Status',cell:x=>h('span.tag '+(x.status===200?'ok':'bad'),x.status)},
+      {k:'ms',t:'Latency',num:true,cell:x=>x.ms+' ms'},
+      {k:'at',t:'When',num:true,cell:x=>h('span.small.muted',fmt.ago(x.at))},
+    ], evs, {noSearch:true})));
+}
+$('#upgrade').onclick = () => modal('Upgrade plan',
+  h('div', h('p.small','This console is an official Hanzo example. There is no checkout behind this button and no plan can be purchased.'),
+    h('p.small.muted','A real upgrade flow would confirm the new limits, prorate the current cycle and collect a payment method.')));
+route({'':usageView,'billing':billing,'keys':keysView,'team':team,'webhooks':webhooks,'*':usageView});
+</script>

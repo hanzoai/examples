@@ -1,0 +1,125 @@
+<!--hz {"title":"Notes","archetype":"notes / knowledge base","creator":"apps","desc":"Note taking with wiki links: markdown editor with live preview, [[backlinks]] resolved across notes, full-text search with ranking, tags, pinning and a graph view of connections.","nav":[["#/","Notes"],["#/graph","Graph"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Notes</h1><span class="tag" id="kpi"></span>
+  <span class="spacer"></span>
+  <input id="q" placeholder="Search notes… (press /)" style="max-width:250px">
+  <button class="p" id="new">+ Note</button>
+</div>
+<div id="view"></div>
+<script>
+const {h,fill,$,store,uid,fmt,esc,toast,submit,route} = hz;
+const SEED = [
+ ['Release process','A release is addressed by the digest of its manifest.\n\nPublishing creates a release then activates it, and activation is an atomic pointer flip. See [[Rollback]] and [[Manifest format]].','process',true],
+ ['Rollback','Activating an earlier release id. Because [[Release process]] makes activation a pointer flip, no rebuild happens.\n\nThe operational value is that recovery time does not depend on build time.','process',true],
+ ['Manifest format','A list of {path, content} entries. Paths are relative and must be safe; content is the full file.\n\nUsed by [[Release process]]. Capped at 4 MiB per request body.','format',false],
+ ['Reserved labels','Names that can never be a site slug. Includes platform surfaces and phishing-sensitive words.\n\nThe list must be a superset of the OAuth redirect labels — see [[Security notes]].','security',false],
+ ['Security notes','Two rules worth writing down.\n\n1. Reserved labels are a security control, not branding — see [[Reserved labels]].\n2. Open create with closed read bounds the blast radius of [[Data layer]] to storage rather than disclosure.','security',true],
+ ['Data layer','One collection per project space for generic capture. Create is open so an anonymous page can post; read stays private.\n\nReferenced by [[Security notes]].','data',false],
+ ['Edge cache','Sixty seconds in the browser, a day at the edge, purged on activate. Interacts with [[Release process]].','ops',false],
+];
+const notes = store('notes', SEED.map(([t,body,tag,pin])=>({id:uid(),t,body,tag,pin,at:Date.now()-Math.random()*20*864e5})));
+const view = $('#view');
+let cur = null, q = '';
+
+const links = n => [...n.body.matchAll(/\[\[([^\]]+)\]\]/g)].map(m=>m[1]);
+const byTitle = t => notes.get().find(n=>n.t.toLowerCase()===String(t).toLowerCase());
+const backlinks = n => notes.get().filter(x=>x.id!==n.id && links(x).some(l=>l.toLowerCase()===n.t.toLowerCase()));
+function md(s){
+  return esc(s)
+    .replace(/\[\[([^\]]+)\]\]/g,(m,t)=>{ const n=byTitle(t);
+      return '<a href="#/n/'+(n?n.id:'')+'" style="'+(n?'':'color:var(--bad);text-decoration:line-through')+'">'+t+'</a>'; })
+    .replace(/^### (.+)$/gm,'<h3>$1</h3>').replace(/^## (.+)$/gm,'<h2>$1</h2>')
+    .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>')
+    .split(/\n\n+/).map(p=>p.startsWith('<h')?p:'<p>'+p.replace(/\n/g,'<br>')+'</p>').join('');
+}
+function kpi(){ const n=notes.get();
+  $('#kpi').textContent = n.length+' notes · '+n.reduce((a,x)=>a+links(x).length,0)+' links'; }
+function score(n, terms){
+  let s = 0;
+  terms.forEach(t=>{ if(n.t.toLowerCase().includes(t)) s+=8;
+    s += (n.body.toLowerCase().split(t).length-1) * 2;
+    if(n.tag.includes(t)) s+=4; });
+  return s;
+}
+function list(){
+  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+  let d = notes.get();
+  if(terms.length) d = d.map(n=>({n, s:score(n,terms)})).filter(x=>x.s>0).sort((a,b)=>b.s-a.s).map(x=>x.n);
+  else d = [...d].sort((a,b)=>(b.pin?1:0)-(a.pin?1:0) || b.at-a.at);
+  fill(view, h('div.split.r',
+    h('div.pane', h('ul.list', d.length? d.map(n=>h('li',{style:{cursor:'pointer',
+        background:cur===n.id?'var(--bg3)':''}, onclick:()=>{location.hash='#/n/'+n.id;}},
+        n.pin? h('span',{title:'Pinned'},'📌') : h('span',{style:{width:'16px'}}),
+        h('div',{style:{minWidth:0}}, h('div.b',n.t),
+          h('div.small.muted.trunc', n.body.replace(/\[\[|\]\]/g,'').slice(0,64))),
+        h('span.spacer'), h('span.tag',n.tag)))
+      : h('li',h('span.muted.small','Nothing matches “'+q+'”')))),
+    cur ? note(notes.get().find(n=>n.id===cur)) : h('div.pane',h('div.empty','Select a note, or create one.'))));
+}
+function note(n){
+  if(!n) return h('div.pane',h('div.empty','That note no longer exists.'));
+  const bl = backlinks(n), out = links(n);
+  return h('div.pane',
+    h('header', n.t, h('span.spacer'),
+      h('button.sm',{onclick:()=>edit(n)},'Edit'),
+      h('button.sm',{onclick:()=>{notes.set(v=>v.map(x=>x.id===n.id?{...x,pin:!x.pin}:x));list();}}, n.pin?'Unpin':'Pin'),
+      h('button.g.sm',{onclick:()=>{notes.set(v=>v.filter(x=>x.id!==n.id));cur=null;kpi();list();}},'Delete')),
+    h('div.body',
+      h('div.row',{style:{gap:'6px',marginBottom:'10px'}}, h('span.tag.acc','#'+n.tag),
+        h('span.small.muted','updated '+fmt.ago(n.at))),
+      h('div',{html:md(n.body)})),
+    h('div.body',{style:{borderTop:'1px solid var(--line)'}},
+      h('div.small.muted','Links out'),
+      h('div.row',{style:{gap:'5px',margin:'4px 0 10px'}}, out.length? out.map(t=>{ const x=byTitle(t);
+        return h('span.tag'+(x?'.acc':'.bad'),{style:{cursor:x?'pointer':''},
+          onclick:()=>x&&(location.hash='#/n/'+x.id)}, t); }) : h('span.small.muted','none')),
+      h('div.small.muted','Backlinks'),
+      h('div.row',{style:{gap:'5px',marginTop:'4px'}}, bl.length? bl.map(x=>h('span.tag',{style:{cursor:'pointer'},
+        onclick:()=>{location.hash='#/n/'+x.id;}}, x.t)) : h('span.small.muted','none'))));
+}
+function edit(n){
+  const t = h('input',{value:n.t}), tag = h('input',{value:n.tag});
+  const b = h('textarea',{value:n.body,style:{minHeight:'300px',fontFamily:'var(--mono)',fontSize:'13px'}});
+  const prev = h('div.body');
+  const sync = () => fill(prev, h('div', h('h2',t.value||'Untitled'), h('div',{html:md(b.value)})));
+  b.oninput = t.oninput = sync; sync();
+  fill(view, h('div.split.r',
+    h('div.pane',h('header','Editing'),h('div.body',
+      h('div.row',h('div.field',{style:{flex:2}},h('label','Title'),t),
+        h('div.field',{style:{flex:1}},h('label','Tag'),tag)),
+      h('div.field',h('label','Body — use [[Title]] to link a note'),b),
+      h('div.row', h('button.g',{onclick:()=>list()},'Cancel'), h('span.spacer'),
+        h('button.p',{onclick:async()=>{
+          notes.set(v=>v.map(x=>x.id===n.id?{...x,t:t.value.trim()||'Untitled',tag:tag.value.trim()||'note',body:b.value,at:Date.now()}:x));
+          kpi(); list();
+          try{ await submit('notes.save',{title:t.value, links:links({body:b.value}).length}); toast('Saved to @hanzo/base'); }
+          catch(e){ toast('Saved locally'); }}},'Save')))),
+    h('div.pane',h('header','Preview'),prev)));
+}
+function graph(){
+  const n = notes.get(), R = 190, cx = 260, cy = 220;
+  const pos = n.map((x,i)=>({x: cx + R*Math.cos(i/n.length*6.283), y: cy + R*Math.sin(i/n.length*6.283), n:x}));
+  const find = t => pos.find(p=>p.n.t.toLowerCase()===String(t).toLowerCase());
+  fill(view, h('div.split.r',
+    h('div.pane',h('header','Link graph'),h('div.body',
+      h('svg',{viewBox:'0 0 520 440',style:'width:100%;height:440px'},
+        (()=>{ const g=[];
+          pos.forEach(p=>links(p.n).forEach(l=>{ const q2=find(l); if(!q2) return;
+            g.push(hz.svg('line',{x1:p.x,y1:p.y,x2:q2.x,y2:q2.y,stroke:'#5b8cff',
+              'stroke-opacity':0.45,'stroke-width':1.5})); }));
+          pos.forEach(p=>{ const deg = links(p.n).length + backlinks(p.n).length;
+            g.push(hz.svg('circle',{cx:p.x,cy:p.y,r:8+deg*2.2,fill:p.n.pin?'#f6b73c':'#8b5cf6','fill-opacity':.9}));
+            const t = hz.svg('text',{x:p.x,y:p.y-14-deg*2,'text-anchor':'middle',
+              fill:'currentColor','font-size':'11'}); t.textContent = p.n.t; g.push(t); });
+          return g; })()))),
+    h('div.pane',h('header','Most connected'),h('ul.list',
+      [...notes.get()].map(x=>({x, d: links(x).length + backlinks(x).length}))
+        .sort((a,b)=>b.d-a.d).map(({x,d})=>h('li',{style:{cursor:'pointer'},
+          onclick:()=>{location.hash='#/n/'+x.id;}}, h('span.b',x.t), h('span.spacer'), h('span.tag',d+' links')))))));
+}
+$('#new').onclick = () => { const n={id:uid(),t:'Untitled',body:'',tag:'note',pin:false,at:Date.now()};
+  notes.set(v=>[n,...v]); cur=n.id; kpi(); edit(n); };
+$('#q').oninput = e => { q = e.target.value; if(!location.hash.includes('graph')) list(); };
+addEventListener('keydown', e => { if(e.key==='/' && document.activeElement!==$('#q')){ e.preventDefault(); $('#q').focus(); }});
+route({'':()=>{cur=null;kpi();list();}, 'n/:id':a=>{cur=a.id;kpi();list();}, 'graph':()=>{kpi();graph();}, '*':()=>{kpi();list();}});
+</script>

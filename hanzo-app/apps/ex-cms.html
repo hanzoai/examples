@@ -1,0 +1,140 @@
+<!--hz {"title":"Content","archetype":"CMS / content modelling","creator":"apps","desc":"Headless CMS admin: define content types and their fields, create entries against those types with generated forms, manage draft/published state, localise, and preview the JSON an API would return.","nav":[["#/","Entries"],["#/model","Content model"],["#/api","API preview"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Content</h1><span class="tag" id="kpi"></span>
+  <span class="spacer"></span>
+  <select id="type" style="max-width:200px"></select>
+  <button class="p" id="new">+ Entry</button>
+</div>
+<div id="view"></div>
+<script>
+const {h,fill,$,store,uid,fmt,grid,modal,toast,submit,route} = hz;
+const TYPES = store('cms.types', [
+  {id:'post', name:'Post', icon:'▤', fields:[
+    {k:'title', t:'text', req:true}, {k:'slug', t:'text', req:true},
+    {k:'excerpt', t:'longtext'}, {k:'body', t:'longtext', req:true},
+    {k:'tags', t:'text'}, {k:'featured', t:'boolean'}, {k:'publishAt', t:'date'}]},
+  {id:'author', name:'Author', icon:'☺', fields:[
+    {k:'name', t:'text', req:true}, {k:'role', t:'text'}, {k:'bio', t:'longtext'}]},
+  {id:'page', name:'Page', icon:'▭', fields:[
+    {k:'title', t:'text', req:true}, {k:'path', t:'text', req:true},
+    {k:'body', t:'longtext'}, {k:'noindex', t:'boolean'}]},
+]);
+const entries = store('cms.entries', [
+  {id:uid(), type:'post', state:'published', locale:'en', at:Date.now()-3*864e5,
+   data:{title:'Deploys should be boring', slug:'deploys-should-be-boring',
+     excerpt:'We replaced a build server with a manifest.',
+     body:'A deploy is now a list of paths and their contents.', tags:'engineering', featured:true, publishAt:'2026-07-10'}},
+  {id:uid(), type:'post', state:'draft', locale:'en', at:Date.now()-1*864e5,
+   data:{title:'On reserved subdomains', slug:'reserved-subdomains',
+     excerpt:'A list of names you cannot have is a security control.',
+     body:'If a user can publish at a label an OAuth client trusts…', tags:'security', featured:false, publishAt:''}},
+  {id:uid(), type:'author', state:'published', locale:'en', at:Date.now()-20*864e5,
+   data:{name:'Hanzo Examples — Web Studio', role:'First-party example account',
+     bio:'Publishes the official Hanzo example sites.'}},
+  {id:uid(), type:'page', state:'published', locale:'en', at:Date.now()-40*864e5,
+   data:{title:'About', path:'/about', body:'This is a demonstration content model.', noindex:false}},
+]);
+const view = $('#view');
+let cur = 'post';
+const typeOf = id => TYPES.get().find(t=>t.id===id);
+function typeSel(){ fill($('#type'), TYPES.get().map(t=>h('option',{value:t.id,selected:t.id===cur},t.icon+'  '+t.name))); }
+$('#type').onchange = e => { cur = e.target.value; list(); };
+function kpi(){ const e=entries.get();
+  $('#kpi').textContent = e.length+' entries · '+e.filter(x=>x.state==='published').length+' published · '+TYPES.get().length+' types'; }
+
+function list(){
+  const t = typeOf(cur);
+  const rows = entries.get().filter(e=>e.type===cur)
+    .map(e=>({...e, _title: e.data[t.fields[0].k] || '(untitled)'}));
+  fill(view, h('div.pane', grid([
+    {k:'_title', t:t.name, cell:e=>h('div',h('div.b',e._title),
+      h('div.small.muted', t.fields.slice(1,3).map(f=>String(e.data[f.k]??'').slice(0,32)).filter(Boolean).join(' · ')))},
+    {k:'state', t:'State', cell:e=>h('span.tag '+(e.state==='published'?'ok':'warn'),e.state)},
+    {k:'locale', t:'Locale', cell:e=>h('span.tag',e.locale)},
+    {k:'at', t:'Updated', num:true, cell:e=>h('span.small.muted',fmt.ago(e.at))},
+  ], rows, {onRow:edit, placeholder:'Search '+t.name.toLowerCase()+'…',
+    empty:'No '+t.name.toLowerCase()+' entries yet'})));
+}
+function field(f, val){
+  const common = {name:f.k, required:f.req};
+  if(f.t==='longtext') return h('textarea',{...common, style:{minHeight:'100px'}, value:val??''});
+  if(f.t==='boolean') return h('input',{...common, type:'checkbox', checked:!!val, required:false});
+  if(f.t==='date') return h('input',{...common, type:'date', value:val??''});
+  return h('input',{...common, value:val??''});
+}
+function edit(e){
+  const t = typeOf(e.type);
+  const inputs = {};
+  const body = h('div', t.fields.map(f => {
+    const el = field(f, e.data[f.k]); inputs[f.k] = el;
+    return h('div.field', h('label', f.k + (f.req?' *':'') + '  ', h('span.tag',f.t)), el);
+  }), h('div.row',
+    h('div.field',{style:{flex:1}},h('label','State'),
+      inputs.__state = h('select',['draft','published','archived'].map(s=>h('option',{selected:s===e.state},s)))),
+    h('div.field',{style:{flex:1}},h('label','Locale'),
+      inputs.__locale = h('select',['en','de','ja','pt'].map(l=>h('option',{selected:l===e.locale},l))))));
+  modal(t.name+' entry', h('div', body,
+    h('button.g',{type:'button',onclick:()=>{entries.set(v=>v.filter(x=>x.id!==e.id));kpi();list();$('dialog').close();}},'Delete entry')),
+    async () => {
+      const data = Object.fromEntries(t.fields.map(f=>[f.k,
+        f.t==='boolean' ? inputs[f.k].checked : inputs[f.k].value]));
+      entries.set(v=>v.map(x=>x.id===e.id?{...x, data, state:inputs.__state.value, locale:inputs.__locale.value, at:Date.now()}:x));
+      kpi(); list();
+      try{ await submit('cms.entry',{type:e.type, state:inputs.__state.value, title:data[t.fields[0].k]});
+        toast('Entry saved to @hanzo/base'); }catch(err){ toast('Entry saved locally'); }
+    });
+}
+$('#new').onclick = () => {
+  const t = typeOf(cur);
+  const e = {id:uid(), type:cur, state:'draft', locale:'en', at:Date.now(),
+    data:Object.fromEntries(t.fields.map(f=>[f.k, f.t==='boolean'?false:'']))};
+  entries.set(v=>[e,...v]); kpi(); list(); edit(e);
+};
+function model(){
+  fill(view, h('div.col', TYPES.get().map(t=>h('div.pane',
+    h('header', t.icon+'  '+t.name, h('span.spacer'),
+      h('span.tag', entries.get().filter(e=>e.type===t.id).length+' entries'),
+      h('button.sm',{onclick:()=>addField(t)},'+ Field')),
+    h('table', h('thead',h('tr',h('th','Field'),h('th','Type'),h('th','Required'),h('th',''))),
+      h('tbody', t.fields.map(f=>h('tr',
+        h('td.mono.small.b',f.k), h('td',h('span.tag',f.t)),
+        h('td', f.req? h('span.tag.acc','required') : h('span.muted','optional')),
+        h('td', h('button.g.sm',{onclick:()=>{
+          TYPES.set(v=>v.map(x=>x.id===t.id?{...x,fields:x.fields.filter(y=>y.k!==f.k)}:x)); model(); }},'Remove'))))))))),
+    h('div.pane',{style:{marginTop:'12px'}},h('div.body',
+      h('button.p',{onclick:()=>{
+        const n = prompt('Content type name'); if(!n) return;
+        TYPES.set(v=>[...v,{id:n.toLowerCase().replace(/\W+/g,'-'),name:n,icon:'◆',
+          fields:[{k:'title',t:'text',req:true}]}]);
+        typeSel(); model(); toast('Type created'); }},'+ New content type'),
+      h('p.hz-note',{style:{marginTop:'10px'}},'Changing the model regenerates every entry form immediately — the form is derived from the type, never written twice.'))));
+}
+function addField(t){
+  const k=h('input',{placeholder:'field_name'});
+  const ty=h('select',['text','longtext','boolean','date','number'].map(x=>h('option',x)));
+  const rq=h('input',{type:'checkbox'});
+  modal('Add field to '+t.name, h('div',
+    h('div.field',h('label','Name'),k), h('div.field',h('label','Type'),ty),
+    h('label.inline',{style:{gap:'8px'}},rq,h('span','Required'))),
+    ()=>{ if(!k.value.trim()) return;
+      TYPES.set(v=>v.map(x=>x.id===t.id?{...x,fields:[...x.fields,{k:k.value.trim(),t:ty.value,req:rq.checked}]}:x));
+      model(); });
+}
+function api(){
+  const t = typeOf(cur);
+  const payload = {
+    collection: t.id,
+    total: entries.get().filter(e=>e.type===cur).length,
+    items: entries.get().filter(e=>e.type===cur && e.state==='published')
+      .map(e=>({id:e.id, locale:e.locale, updatedAt:new Date(e.at).toISOString(), ...e.data})),
+  };
+  fill(view, h('div.split',
+    h('div.pane',h('header','Request'),h('div.body',
+      h('pre','GET /v1/content/'+t.id+'?state=published&locale=en'),
+      h('p.small.muted',{style:{marginTop:'10px'}},'A headless CMS is only useful if the shape it returns is predictable. This preview is generated from the live content model and the entries on the left — change either and the payload changes with it.'))),
+    h('div.pane',h('header','Response'),h('div.body',
+      h('pre',{style:{maxHeight:'440px',overflow:'auto'}}, JSON.stringify(payload,null,2))))));
+}
+route({'':()=>{typeSel();list();}, 'model':()=>{typeSel();model();}, 'api':()=>{typeSel();api();}, '*':()=>{typeSel();list();}});
+kpi();
+</script>

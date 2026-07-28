@@ -1,0 +1,125 @@
+<!--hz {"title":"Expenses","archetype":"finance / expense tracking","creator":"apps","desc":"Expense reports: submit a claim with a real file attachment, policy checks that flag violations, an approver queue, per-category budget burn-down and CSV export.","nav":[["#/","My claims"],["#/approve","Approvals"],["#/budget","Budgets"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Expenses</h1><span class="tag" id="kpi"></span>
+  <span class="spacer"></span>
+  <button id="csv">Export</button><button class="p" id="new">+ Claim</button>
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:16px">Claims, budgets and policies are synthetic. Attachments stay in this browser; only the file name, type and size are recorded in @hanzo/base.</p>
+<script>
+const {h,fill,$,store,rng,range,pick,uid,fmt,grid,bars,donut,modal,toast,submit,route,avatar} = hz;
+const r = rng(5150);
+const CATS = [['travel','Travel',12000],['meals','Meals',4000],['software','Software',9000],
+  ['hardware','Hardware',15000],['training','Training',6000]];
+const POLICY = {meals:75, travel:1200, software:500, hardware:2500, training:1500};
+const PEOPLE = ['Ada L','Grace H','Ken T','Barbara L'];
+const seed = range(18, i => {
+  const c = pick(r, CATS)[0];
+  const amt = +( (POLICY[c] * (0.15 + r()*1.3)).toFixed(2) );
+  return {id:'EXP-'+(2100+i), who: pick(r,PEOPLE), cat:c, amount:amt,
+    merchant: pick(r,['Rail Europe','Cafe Verde','Package Registry','Parts Depot','Course Platform','City Taxi']),
+    at: Date.now()-Math.round(r()*70)*864e5,
+    state: r()<0.28?'approved':r()<0.5?'rejected':'submitted', note:'', file:null};
+});
+const db = store('expenses', seed);
+const view = $('#view');
+
+const violates = e => e.amount > POLICY[e.cat];
+function kpi(){ const d=db.get();
+  $('#kpi').textContent = d.length+' claims · '+fmt.money(d.reduce((a,x)=>a+x.amount,0))+' · '
+    + d.filter(violates).length+' over policy'; }
+const stateTag = s => h('span.tag '+({approved:'ok',rejected:'bad',submitted:'warn'}[s]||''), s);
+function mine(){
+  fill(view, h('div.pane', grid([
+    {k:'id',t:'Claim',w:'100px',cell:e=>h('span.mono.small',e.id)},
+    {k:'merchant',t:'Merchant',cell:e=>h('div',h('div.b',e.merchant),
+      h('div.small.muted',CATS.find(c=>c[0]===e.cat)[1]+' · '+fmt.date(e.at)))},
+    {k:'amount',t:'Amount',num:true,cell:e=>h('span'+(violates(e)?'.down.b':''),fmt.money(e.amount))},
+    {k:'state',t:'State',cell:e=>stateTag(e.state)},
+    {k:'who',t:'Claimant',cell:e=>h('div.row',{style:{gap:'7px'}},avatar(e.who,22),h('span.small',e.who))},
+    {k:'cat',t:'Policy',cell:e=>violates(e)? h('span.tag.bad','over '+fmt.money(POLICY[e.cat]))
+      : h('span.tag.ok','within')},
+  ], db.get(), {onRow:detail, placeholder:'Search merchant or claim id…'})));
+}
+function detail(e){
+  modal(e.id+' · '+e.merchant, h('div',
+    h('div.row',{style:{gap:'6px',marginBottom:'12px'}},
+      h('span.tag.acc',fmt.money(e.amount)), h('span.tag',CATS.find(c=>c[0]===e.cat)[1]),
+      stateTag(e.state), violates(e)? h('span.tag.bad','policy: max '+fmt.money(POLICY[e.cat])):null),
+    h('table',h('tbody',[['Claimant',e.who],['Date',fmt.date(e.at)],
+      ['Attachment', e.file? e.file.name+' ('+fmt.kb(e.file.size)+')' : 'none']]
+      .map(([k,v])=>h('tr',h('td.small.muted',k),h('td.b',v))))),
+    e.note? h('p.small',{style:{marginTop:'10px'}},'Note: '+e.note) : null));
+}
+function approve(){
+  const pend = db.get().filter(e=>e.state==='submitted');
+  fill(view, h('div.pane', h('header','Awaiting approval · '+pend.length),
+    pend.length? h('ul.list', pend.map(e=>h('li',{style:{alignItems:'flex-start'}},
+      avatar(e.who,30),
+      h('div',{style:{minWidth:0}}, h('div.b',e.merchant+' · '+fmt.money(e.amount)),
+        h('div.small.muted', e.who+' · '+CATS.find(c=>c[0]===e.cat)[1]+' · '+fmt.date(e.at)),
+        violates(e)? h('div.small.down',{style:{marginTop:'3px'}},
+          'Over the '+fmt.money(POLICY[e.cat])+' limit for this category by '+fmt.money(e.amount-POLICY[e.cat])) : null),
+      h('span.spacer'),
+      h('button.sm',{onclick:async()=>{ db.set(v=>v.map(x=>x.id===e.id?{...x,state:'approved'}:x));
+        kpi(); approve(); await submit('expenses.decision',{claim:e.id,decision:'approved'}).catch(()=>{});
+        toast('Approved '+e.id); }},'Approve'),
+      h('button.g.sm',{onclick:()=>{ db.set(v=>v.map(x=>x.id===e.id?{...x,state:'rejected'}:x));
+        kpi(); approve(); toast('Rejected '+e.id); }},'Reject'))))
+      : h('div.empty','Nothing is waiting for approval.')));
+}
+function budget(){
+  const d = db.get().filter(e=>e.state!=='rejected');
+  const rows = CATS.map(([k,label,cap])=>{
+    const spent = d.filter(e=>e.cat===k).reduce((a,e)=>a+e.amount,0);
+    return {k, label, cap, spent, pct: spent/cap*100};
+  });
+  fill(view, h('div.split.r',
+    h('div.pane',h('header','Budget burn-down'),h('div.body.col',
+      rows.map(x=>h('div',
+        h('div.row',h('span.b',x.label), h('span.spacer'),
+          h('span.small.num', fmt.money(x.spent)+' of '+fmt.money(x.cap))),
+        h('div.bar',{style:{marginTop:'5px'}},h('i',{style:{width:Math.min(100,x.pct)+'%',
+          background: x.pct>90?'var(--bad)':x.pct>70?'var(--warn)':'var(--ok)'}})),
+        h('div.small.muted',{style:{marginTop:'3px'}}, x.pct.toFixed(0)+'% used · '+fmt.money(Math.max(0,x.cap-x.spent))+' left'))))),
+    h('div.col',
+      h('div.pane',h('header','Spend by category'),h('div.body',
+        donut(rows.filter(x=>x.spent).map(x=>({k:x.label, v:x.spent}))))),
+      h('div.pane',h('header','Policy limits'),h('table',
+        h('thead',h('tr',h('th','Category'),h('th','Per-claim limit'))),
+        h('tbody', CATS.map(([k,l])=>h('tr',h('td',l),h('td.num',fmt.money(POLICY[k]))))))))));
+}
+$('#new').onclick = () => {
+  const m=h('input',{required:true,placeholder:'Merchant'});
+  const a=h('input',{type:'number',step:'0.01',required:true,value:'42.00'});
+  const c=h('select',CATS.map(([k,l])=>h('option',{value:k},l)));
+  const n=h('textarea',{placeholder:'What was this for?'});
+  const fileEl=h('input',{type:'file'});
+  const warn=h('div.small.down',{style:{minHeight:'18px'}});
+  const check = () => { const v=+a.value; warn.textContent = v>POLICY[c.value]
+    ? 'This exceeds the '+fmt.money(POLICY[c.value])+' limit and will need extra approval.' : ''; };
+  a.oninput = c.onchange = check; check();
+  modal('New expense claim', h('div',
+    h('div.row',h('div.field',{style:{flex:2}},h('label','Merchant'),m),
+      h('div.field',{style:{flex:1}},h('label','Amount (USD)'),a)),
+    h('div.field',h('label','Category'),c), warn,
+    h('div.field',h('label','Note'),n),
+    h('div.field',h('label','Receipt'),fileEl)),
+    async () => {
+      if(!m.value.trim()) return toast('Merchant is required');
+      const f = fileEl.files[0];
+      const e = {id:'EXP-'+(2200+db.get().length), who:'You', cat:c.value, amount:+a.value||0,
+        merchant:m.value.trim(), at:Date.now(), state:'submitted', note:n.value.trim(),
+        file: f? {name:f.name, size:f.size, type:f.type} : null};
+      db.set(v=>[e,...v]); kpi(); mine();
+      try{ await submit('expenses.claim', e); toast('Claim submitted to @hanzo/base'); }
+      catch(err){ toast('Claim recorded locally'); }
+    }, 'Submit');
+};
+$('#csv').onclick = () => {
+  const cols=['id','who','cat','merchant','amount','state'];
+  const csv=[cols.join(','), ...db.get().map(e=>cols.map(k=>e[k]).join(','))].join('\n');
+  h('a',{download:'expenses.csv',href:URL.createObjectURL(new Blob([csv],{type:'text/csv'}))}).click();
+};
+route({'':()=>{kpi();mine();}, 'approve':()=>{kpi();approve();}, 'budget':()=>{kpi();budget();}, '*':()=>{kpi();mine();}});
+</script>

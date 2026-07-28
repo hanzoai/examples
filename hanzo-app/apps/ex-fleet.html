@@ -1,0 +1,128 @@
+<!--hz {"title":"Fleet","archetype":"infrastructure monitoring","creator":"data","desc":"Live fleet monitor: node table with rolling CPU/memory/latency, a streaming request meter that updates every second, alert rules that fire and clear, and a log tail with severity filter.","nav":[["#/","Nodes"],["#/alerts","Alerts"],["#/logs","Logs"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Fleet</h1>
+  <span class="tag" id="health"></span>
+  <span class="spacer"></span>
+  <span class="small muted" id="clock"></span>
+  <button id="pause">⏸ Pause</button>
+</div>
+<div class="grid k4" id="tiles" style="margin-bottom:16px"></div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:16px">The stream is generated in this page — a random walk with occasional injected spikes — so the alerting and log behaviour can be watched end to end. No real infrastructure is being measured.</p>
+<script>
+const {h,fill,$,store,rng,range,pick,fmt,spark,area,grid,route,submit,toast} = hz;
+const r = rng(1919);
+const REGIONS = ['sfo3','nyc1','ams3','sgp1'];
+const NODES = range(12, i => ({
+  id:'node-'+String(i+1).padStart(2,'0'), region: REGIONS[i%4],
+  role: i%4===0?'edge':i%4===1?'api':i%4===2?'worker':'db',
+  cpu: 20+r()*40, mem: 30+r()*35, p95: 20+r()*60, rps: 200+r()*900,
+  hist: range(40, ()=>20+r()*40), up: true,
+}));
+const RULES = [
+  {id:'cpu', t:'CPU above 85% for 3 samples', test:n=>n.cpu>85, sev:'warning'},
+  {id:'mem', t:'Memory above 90%', test:n=>n.mem>90, sev:'critical'},
+  {id:'p95', t:'p95 latency above 400 ms', test:n=>n.p95>400, sev:'warning'},
+  {id:'down', t:'Node unreachable', test:n=>!n.up, sev:'critical'},
+];
+const logs = [];
+const alerts = new Map();
+let running = true, t = 0;
+const view = $('#view');
+
+function step(){
+  t++;
+  NODES.forEach(n=>{
+    if(!running) return;
+    const spike = Math.random() < 0.012;
+    n.cpu = Math.max(3, Math.min(100, n.cpu + (Math.random()-0.5)*9 + (spike?38:0)));
+    n.mem = Math.max(5, Math.min(100, n.mem + (Math.random()-0.5)*4 + (spike?12:0)));
+    n.p95 = Math.max(8, n.p95 + (Math.random()-0.5)*22 + (spike?260:0));
+    n.p95 = Math.min(n.p95, 900);
+    n.rps = Math.max(20, n.rps + (Math.random()-0.5)*140);
+    if(Math.random()<0.0016) n.up = !n.up;
+    n.hist = [...n.hist.slice(1), n.cpu];
+    RULES.forEach(rule=>{
+      const key = rule.id+':'+n.id, firing = rule.test(n);
+      if(firing && !alerts.has(key)){
+        alerts.set(key, {rule, node:n.id, since:Date.now(), sev:rule.sev});
+        log(rule.sev==='critical'?'error':'warn', n.id+' '+rule.t);
+        submit('fleet.alert',{node:n.id, rule:rule.id, sev:rule.sev}).catch(()=>{});
+      } else if(!firing && alerts.has(key)){
+        alerts.delete(key); log('info', n.id+' recovered: '+rule.t);
+      }
+    });
+  });
+  if(running && t%3===0) log('info', pick(Math.random, ['GET /v1/sites 200','POST /v1/sites/deploy 200',
+    'GET /hz.js 200','POST /v1/base/collections/submissions/records 200'])+' '+
+    pick(Math.random,NODES).id+' '+Math.round(4+Math.random()*90)+'ms');
+  tiles();
+  const at = location.hash.replace(/^#\/?/,'');
+  if(at==='alerts') alertsView(); else if(at==='logs') logsView(); else nodes();
+  $('#clock').textContent = new Date().toLocaleTimeString();
+}
+function log(level, msg){ logs.push({level, msg, at:Date.now()}); if(logs.length>400) logs.shift(); }
+function tiles(){
+  const upN = NODES.filter(n=>n.up).length;
+  const cpu = NODES.reduce((a,n)=>a+n.cpu,0)/NODES.length;
+  const rps = NODES.reduce((a,n)=>a+n.rps,0);
+  const p95 = Math.max(...NODES.map(n=>n.p95));
+  $('#health').textContent = alerts.size? alerts.size+' firing' : 'all clear';
+  $('#health').className = 'tag '+(alerts.size? ([...alerts.values()].some(a=>a.sev==='critical')?'bad':'warn') : 'ok');
+  fill($('#tiles'),
+    tile('Nodes up', upN+' / '+NODES.length, upN===NODES.length?'up':'down'),
+    tile('Mean CPU', cpu.toFixed(0)+'%', cpu<70?'up':'down'),
+    tile('Requests', fmt.n(rps,0)+'/s', 'up'),
+    tile('Worst p95', Math.round(p95)+' ms', p95<400?'up':'down'));
+}
+function tile(k,v,cls){ return h('div.stat', h('div.k',k), h('div.v.'+cls, v)); }
+function nodes(){
+  fill(view, h('div.pane', grid([
+    {k:'id',t:'Node',cell:n=>h('div.row',{style:{gap:'7px'}},
+      h('span',{style:{width:'8px',height:'8px',borderRadius:'50%',flex:'none',
+        background:n.up?'var(--ok)':'var(--bad)'}}), h('span.mono.small.b',n.id))},
+    {k:'region',t:'Region',cell:n=>h('span.tag',n.region)},
+    {k:'role',t:'Role',cell:n=>h('span.tag.acc',n.role)},
+    {k:'cpu',t:'CPU',num:true,cell:n=>h('span',{style:{color:n.cpu>85?'var(--bad)':''}},n.cpu.toFixed(0)+'%')},
+    {k:'mem',t:'Memory',num:true,cell:n=>h('span',{style:{color:n.mem>90?'var(--bad)':''}},n.mem.toFixed(0)+'%')},
+    {k:'p95',t:'p95',num:true,cell:n=>h('span',{style:{color:n.p95>400?'var(--warn)':''}},Math.round(n.p95)+' ms')},
+    {k:'rps',t:'Req/s',num:true,cell:n=>fmt.n(n.rps,0)},
+    {k:'hist',t:'CPU trend',w:'120px',cell:n=>spark(n.hist, n.cpu>85?'#f4685e':'#3ecf8e',110,24)},
+  ], NODES, {noSearch:true})));
+}
+function alertsView(){
+  const a = [...alerts.values()].sort((x,y)=>x.since-y.since);
+  fill(view, h('div.split.r',
+    h('div.pane', h('header','Firing alerts · '+a.length),
+      a.length? h('ul.list', a.map(x=>h('li',
+        h('span.tag '+(x.sev==='critical'?'bad':'warn'), x.sev),
+        h('div',{style:{minWidth:0}}, h('div.b',x.rule.t), h('div.small.muted',x.node+' · firing for '+
+          Math.max(1,Math.round((Date.now()-x.since)/1000))+'s')),
+        h('span.spacer'),
+        h('button.sm',{onclick:()=>{toast('Silenced for this session');}},'Silence'))))
+        : h('div.empty','Nothing is firing right now. Watch — the stream injects spikes.')),
+    h('div.pane',h('header','Rules'),
+      h('ul.list', RULES.map(rl=>h('li',
+        h('span.tag'+(rl.sev==='critical'?'.bad':'.warn'),rl.sev),
+        h('span.small',rl.t), h('span.spacer'),
+        h('span.tag', NODES.filter(rl.test).length+' matching')))))));
+}
+let lvl = 'all';
+function logsView(){
+  const shown = logs.filter(l=>lvl==='all'||l.level===lvl).slice(-140).reverse();
+  fill(view, h('div.pane',
+    h('header','Log tail', h('span.spacer'),
+      ...['all','info','warn','error'].map(l=>h('button.sm'+(lvl===l?' p':''),
+        {onclick:()=>{lvl=l;logsView();}}, l))),
+    h('div',{style:{maxHeight:'52vh',overflow:'auto',padding:'10px 14px',fontFamily:'var(--mono)',fontSize:'12px'}},
+      shown.length? shown.map(l=>h('div',{style:{whiteSpace:'pre-wrap',
+          color: l.level==='error'?'var(--bad)':l.level==='warn'?'var(--warn)':'var(--fg2)'}},
+        new Date(l.at).toLocaleTimeString()+'  '+l.level.toUpperCase().padEnd(5)+'  '+l.msg))
+        : h('div.empty','No lines at this level yet.'))));
+}
+$('#pause').onclick = () => { running = !running;
+  $('#pause').textContent = running? '⏸ Pause' : '▶ Resume'; };
+route({'':nodes,'alerts':alertsView,'logs':logsView,'*':nodes});
+range(20,()=>log('info','boot: node registered'));
+tiles(); step(); setInterval(step, 1000);
+</script>

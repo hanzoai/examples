@@ -1,0 +1,118 @@
+<!--hz {"title":"Invoice","archetype":"finance / document builder","creator":"apps","desc":"Invoice builder: editable line items with quantity and rate, tax and discount rules, multi-currency, a print-ready A4 preview that really prints, and a saved-invoice list in @hanzo/base.","nav":[["#/","Builder"],["#/list","Invoices"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Invoice</h1><span class="tag acc" id="tot"></span>
+  <span class="spacer"></span>
+  <button id="print">Print / PDF</button><button class="p" id="save">Save invoice</button>
+</div>
+<div id="view"></div>
+<style>@media print{.hz-top,.hz-foot,.row>button,#view>.split>.pane:first-child{display:none!important}
+  body{background:#fff;color:#000}#sheet{box-shadow:none;border:0}}</style>
+<script>
+const {h,fill,$,store,uid,fmt,toast,submit,route,grid} = hz;
+const CUR = {USD:'$',EUR:'€',GBP:'£',JPY:'¥'};
+const doc = store('invoice.doc', {
+  number:'INV-2026-0007', issued:new Date().toISOString().slice(0,10),
+  due:new Date(Date.now()+14*864e5).toISOString().slice(0,10),
+  cur:'USD', taxRate:8.75, discount:0, notes:'Payment due within 14 days. This is a demonstration document.',
+  from:{name:'Hanzo Examples — App Studio', line:'Official first-party example account', vat:''},
+  to:{name:'Northwind Ltd', line:'12 Example Street, Rotterdam', vat:'NL000000000B01'},
+  items:[
+    {id:uid(), d:'Release engineering retainer', q:1, r:6400},
+    {id:uid(), d:'Console usage view — design and build', q:34, r:145},
+    {id:uid(), d:'Edge cache policy review', q:8, r:180},
+  ],
+});
+const saved = store('invoice.saved', []);
+const view = $('#view');
+const sym = () => CUR[doc.get().cur];
+function totals(){
+  const d = doc.get();
+  const sub = d.items.reduce((a,i)=>a+i.q*i.r,0);
+  const disc = sub*(d.discount/100);
+  const tax = (sub-disc)*(d.taxRate/100);
+  return {sub, disc, tax, total: sub-disc+tax};
+}
+function money(v){ const d=doc.get();
+  return sym()+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function builder(){
+  const d = doc.get(), t = totals();
+  $('#tot').textContent = money(t.total)+' '+d.cur;
+  const set = (path, v) => doc.set(o=>{ const n=structuredClone(o);
+    const parts=path.split('.'); let cur=n;
+    parts.slice(0,-1).forEach(k=>cur=cur[k]); cur[parts.at(-1)]=v; return n; });
+  const fld = (label, path, type) => h('div.field',{style:{margin:0}}, h('label',label),
+    h('input',{type:type||'text', value: path.split('.').reduce((o,k)=>o[k], d),
+      oninput:e=>{ set(path, type==='number'? +e.target.value : e.target.value); builder(); }}));
+  fill(view, h('div.split',
+    h('div.pane',h('header','Details'),h('div.body.col',
+      h('div.row',h('div',{style:{flex:1}},fld('Invoice number','number')),
+        h('div',{style:{flex:1}},h('div.field',{style:{margin:0}},h('label','Currency'),
+          h('select',{onchange:e=>{set('cur',e.target.value);builder();}},
+            Object.keys(CUR).map(c=>h('option',{selected:c===d.cur},c)))))),
+      h('div.row',h('div',{style:{flex:1}},fld('Issued','issued','date')),
+        h('div',{style:{flex:1}},fld('Due','due','date'))),
+      h('hr'),
+      h('div.small.muted','From'), fld('Name','from.name'), fld('Address line','from.line'), fld('VAT id','from.vat'),
+      h('hr'),
+      h('div.small.muted','Bill to'), fld('Name','to.name'), fld('Address line','to.line'), fld('VAT id','to.vat'),
+      h('hr'),
+      h('div.row',h('div',{style:{flex:1}},fld('Tax rate %','taxRate','number')),
+        h('div',{style:{flex:1}},fld('Discount %','discount','number'))),
+      h('div.field',{style:{margin:0}},h('label','Notes'),
+        h('textarea',{value:d.notes,oninput:e=>{set('notes',e.target.value);builder();}})),
+      h('button.p',{onclick:()=>{ doc.set(o=>({...o, items:[...o.items,{id:uid(),d:'New line item',q:1,r:0}]})); builder(); }},'+ Line item'))),
+    h('div.pane',{id:'sheet'},h('div.body',{style:{padding:'30px'}},
+      h('div.row',{style:{alignItems:'flex-start',marginBottom:'26px'}},
+        h('div', h('h1',{style:{margin:0,fontSize:'26px'}},'Invoice'),
+          h('div.small.muted',d.number)),
+        h('span.spacer'),
+        h('div',{style:{textAlign:'right'}},
+          h('div.small.muted','Issued'), h('div.b',d.issued),
+          h('div.small.muted',{style:{marginTop:'6px'}},'Due'), h('div.b',d.due))),
+      h('div.row',{style:{gap:'40px',marginBottom:'22px'}},
+        h('div',h('div.small.muted','From'),h('div.b',d.from.name),
+          h('div.small',d.from.line), d.from.vat? h('div.small.muted','VAT '+d.from.vat):null),
+        h('div',h('div.small.muted','Bill to'),h('div.b',d.to.name),
+          h('div.small',d.to.line), d.to.vat? h('div.small.muted','VAT '+d.to.vat):null)),
+      h('table',
+        h('thead',h('tr',h('th','Description'),h('th','Qty'),h('th','Rate'),h('th','Amount'),h('th',''))),
+        h('tbody', d.items.map(i=>h('tr',
+          h('td',h('input',{value:i.d,style:{border:0,background:'transparent',padding:'2px 0'},
+            oninput:e=>{ doc.set(o=>({...o,items:o.items.map(x=>x.id===i.id?{...x,d:e.target.value}:x)})); }})),
+          h('td.num',h('input',{type:'number',value:i.q,style:{border:0,background:'transparent',width:'64px',textAlign:'right',padding:'2px 0'},
+            oninput:e=>{ doc.set(o=>({...o,items:o.items.map(x=>x.id===i.id?{...x,q:+e.target.value}:x)})); builder(); }})),
+          h('td.num',h('input',{type:'number',value:i.r,style:{border:0,background:'transparent',width:'88px',textAlign:'right',padding:'2px 0'},
+            oninput:e=>{ doc.set(o=>({...o,items:o.items.map(x=>x.id===i.id?{...x,r:+e.target.value}:x)})); builder(); }})),
+          h('td.num.b',money(i.q*i.r)),
+          h('td',h('button.g.sm',{onclick:()=>{ doc.set(o=>({...o,items:o.items.filter(x=>x.id!==i.id)})); builder(); }},'✕')))))),
+      h('div',{style:{marginTop:'18px',marginLeft:'auto',maxWidth:'300px'}},
+        row('Subtotal',money(t.sub)),
+        d.discount? row('Discount '+d.discount+'%','−'+money(t.disc)) : null,
+        row('Tax '+d.taxRate+'%',money(t.tax)),
+        h('hr'), row('Total due',money(t.total)+' '+d.cur, true)),
+      h('p.small.muted',{style:{marginTop:'24px'}},d.notes),
+      h('p.hz-note','Official Hanzo example. This document is not a demand for payment and the parties named are placeholders.')))));
+}
+const row = (k,v,b) => h('div.row',{style:{justifyContent:'space-between',marginBottom:'5px'}},
+  h('span'+(b?'.b':'.small.muted'),k), h('span.num'+(b?'.b':''),v));
+function listView(){
+  fill(view, h('div.pane',h('header','Saved invoices'),
+    saved.get().length? grid([
+      {k:'number',t:'Number',cell:x=>h('span.mono.small',x.number)},
+      {k:'to',t:'Bill to'},
+      {k:'issued',t:'Issued'},
+      {k:'total',t:'Total',num:true,cell:x=>x.cur+' '+x.total.toFixed(2)},
+      {k:'items',t:'Lines',num:true},
+    ], saved.get(), {noSearch:true})
+      : h('div.empty','No invoices saved yet — build one and press Save.')));
+}
+$('#print').onclick = () => print();
+$('#save').onclick = async () => {
+  const d = doc.get(), t = totals();
+  const rec = {number:d.number, to:d.to.name, issued:d.issued, cur:d.cur, total:+t.total.toFixed(2), items:d.items.length};
+  saved.set(v=>[rec,...v]);
+  try{ await submit('invoice.save', rec); toast('Invoice saved to @hanzo/base'); }
+  catch(e){ toast('Invoice saved locally'); }
+};
+route({'':builder,'list':listView,'*':builder});
+</script>

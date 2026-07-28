@@ -1,0 +1,114 @@
+<!--hz {"title":"Events","archetype":"booking / events","creator":"web","desc":"Event listing and registration: month and list views, capacity with a waitlist, ticket tiers, an ICS calendar file generated in the browser and registration written to @hanzo/base.","nav":[["#/","Events"],["#/mine","My tickets"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Events</h1><span class="tag" id="n"></span>
+  <span class="spacer"></span><span id="modes" class="row" style="gap:4px"></span>
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:16px">Events, venues and capacities are synthetic. Registering records a ticket in this browser and in @hanzo/base; no seat is reserved and nothing is charged.</p>
+<script>
+const {h,fill,$,store,rng,range,pick,uid,fmt,modal,toast,submit,route,tabs} = hz;
+const r = rng(1201);
+const TIERS = [['general','General admission',0],['supporter','Supporter',25],['workshop','Workshop day',75]];
+const E = [
+ ['Deploy Day','A single-track day on release engineering: content addressing, atomic activation and rollbacks that are not rebuilds.','Amsterdam',7,120],
+ ['Edge & Cache Workshop','Hands-on session tuning cache keys, stale-while-revalidate and purge strategy at the edge.','Remote',12,40],
+ ['Data Layer Clinic','Bring a schema. Leave with a rules model that does not leak.','London',19,60],
+ ['Static First','Why most product surfaces are static plus one endpoint, and how to tell when yours is not.','Berlin',26,180],
+ ['Incident Review, Live','A public post-incident review, run the way you wish yours were run.','Remote',33,300],
+ ['Shader Jam','Two hours, one fragment shader each, no assets allowed.','Lisbon',41,50],
+];
+const T0 = Date.now();
+const seed = E.map(([t,d,city,day,cap],i)=>({id:uid(), t, d, city, cap,
+  at: T0 + day*864e5 + 10*36e5, taken: Math.round(cap*(0.3+r()*0.75)), hue:[210,268,150,32,340,190][i%6]}));
+const db = store('events', seed);
+const tickets = store('events.tickets', []);
+const view = $('#view');
+let mode = 'List';
+
+const full = e => e.taken >= e.cap;
+function events(){
+  const d = db.get();
+  $('#n').textContent = d.length+' upcoming';
+  if(mode==='Calendar') return calendar(d);
+  fill(view, h('div.grid.wide', d.map(e=>h('div.card',
+    h('div',{style:{height:'92px',borderRadius:'8px',display:'flex',alignItems:'flex-end',padding:'10px',
+      background:`linear-gradient(135deg,hsl(${e.hue} 50% 34%),hsl(${(e.hue+50)%360} 46% 20%))`,color:'#fff'}},
+      h('div',h('div',{style:{fontSize:'22px',fontWeight:700,lineHeight:1}},new Date(e.at).getDate()),
+        h('div',{style:{fontSize:'11px',letterSpacing:'.08em'}},
+          new Date(e.at).toLocaleDateString('en-US',{month:'short',year:'numeric'}).toUpperCase()))),
+    h('h3',{style:{margin:'10px 0 4px'}},e.t),
+    h('p.small',{style:{margin:'0 0 10px'}},e.d),
+    h('div.row',{style:{gap:'6px'}}, h('span.tag',e.city),
+      h('span.tag'+(full(e)?' bad':' ok'), full(e)?'waitlist':(e.cap-e.taken)+' seats left'),
+      h('span.spacer'), h('span.small.muted',fmt.time(e.at))),
+    h('div.bar',{style:{margin:'10px 0'}},h('i',{style:{width:Math.min(100,e.taken/e.cap*100)+'%',
+      background: full(e)?'var(--bad)':'var(--acc)'}})),
+    h('div.row', h('button.p',{style:{flex:1},onclick:()=>register(e)}, full(e)?'Join waitlist':'Register'),
+      h('button',{onclick:()=>ics(e)},'＋ Calendar'))))));
+}
+function calendar(d){
+  const now = new Date(), y=now.getFullYear(), m=now.getMonth();
+  const first=new Date(y,m,1), pad=(first.getDay()+6)%7, days=new Date(y,m+1,0).getDate();
+  const cells=[...range(pad,()=>null), ...range(days,i=>new Date(y,m,i+1))];
+  fill(view, h('div.pane',
+    h('header', first.toLocaleDateString('en-US',{month:'long',year:'numeric'})),
+    h('div.body',
+      h('div',{style:{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:'6px',marginBottom:'6px'}},
+        ['Mo','Tu','We','Th','Fr','Sa','Su'].map(x=>h('div.small.muted',{style:{textAlign:'center'}},x))),
+      h('div',{style:{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:'6px'}},
+        cells.map(dt=>{
+          if(!dt) return h('div');
+          const on = d.filter(e=>new Date(e.at).toDateString()===dt.toDateString());
+          return h('div.card.tight',{style:{minHeight:'78px',padding:'6px',
+            borderColor: on.length?'var(--acc)':''},},
+            h('div.small.muted',dt.getDate()),
+            on.map(e=>h('div',{style:{fontSize:'10.5px',marginTop:'3px',padding:'2px 4px',borderRadius:'4px',
+              cursor:'pointer', background:`hsl(${e.hue} 45% 30%)`,color:'#fff'},
+              onclick:()=>register(e)}, e.t)));
+        })))));
+}
+function ics(e){
+  const dt = d => new Date(d).toISOString().replace(/[-:]/g,'').split('.')[0]+'Z';
+  const body = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Hanzo Example//Events//EN','BEGIN:VEVENT',
+    'UID:'+e.id+'@example.invalid','DTSTAMP:'+dt(Date.now()),'DTSTART:'+dt(e.at),'DTEND:'+dt(e.at+3*36e5),
+    'SUMMARY:'+e.t,'LOCATION:'+e.city,'DESCRIPTION:'+e.d.replace(/,/g,'\\,'),'END:VEVENT','END:VCALENDAR'].join('\r\n');
+  h('a',{download:e.t.replace(/\W+/g,'-').toLowerCase()+'.ics',
+    href:URL.createObjectURL(new Blob([body],{type:'text/calendar'}))}).click();
+  toast('Calendar file downloaded');
+}
+function register(e){
+  const nm=h('input',{required:true}), em=h('input',{type:'email',required:true,placeholder:'you@example.invalid'});
+  const tier=h('select',TIERS.map(([k,l,p])=>h('option',{value:k},l+(p?' · '+fmt.money(p):' · Free'))));
+  modal((full(e)?'Join the waitlist for ':'Register for ')+e.t, h('div',
+    h('div.row',{style:{gap:'6px',marginBottom:'10px'}},
+      h('span.tag.acc',new Date(e.at).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})),
+      h('span.tag',e.city), h('span.tag',(e.cap-e.taken)+' of '+e.cap+' free')),
+    h('div.field',h('label','Name'),nm), h('div.field',h('label','Email'),em),
+    h('div.field',h('label','Ticket'),tier),
+    h('p.hz-note','No payment is collected. Supporter and workshop tiers are shown to demonstrate tiering only.')),
+    async () => {
+      if(!nm.value.trim()||!em.value.trim()) return toast('Name and email are required');
+      const waiting = full(e);
+      db.set(v=>v.map(x=>x.id===e.id?{...x,taken:x.taken+1}:x));
+      const t = {id:uid(), event:e.t, at:e.at, city:e.city, tier:tier.value, name:nm.value, email:em.value,
+        state: waiting?'waitlist':'confirmed', bought:Date.now()};
+      tickets.set(v=>[t,...v]); events();
+      try{ await submit('events.register', t); toast(waiting?'Added to the waitlist':'Registered'); }
+      catch(err){ toast('Recorded locally'); }
+    }, full(e)?'Join waitlist':'Register');
+}
+function mine(){
+  const t = tickets.get();
+  fill(view, h('div.pane',h('header','Your tickets'),
+    t.length? h('table',h('thead',h('tr',h('th','Event'),h('th','When'),h('th','Tier'),h('th','State'),h('th',''))),
+      h('tbody', t.map(x=>h('tr',
+        h('td',h('div.b',x.event),h('div.small.muted',x.city)),
+        h('td.small',fmt.date(x.at)+' '+fmt.time(x.at)),
+        h('td',h('span.tag',x.tier)),
+        h('td',h('span.tag '+(x.state==='confirmed'?'ok':'warn'),x.state)),
+        h('td',h('button.g.sm',{onclick:()=>{tickets.set(v=>v.filter(y=>y.id!==x.id));mine();toast('Ticket released');}},'Cancel'))))))
+      : h('div.empty','No tickets yet — register for an event.')));
+}
+fill($('#modes'), tabs(['List','Calendar'], m=>{mode=m; if(!location.hash.includes('mine')) events();}));
+route({'':events,'mine':mine,'*':events});
+</script>

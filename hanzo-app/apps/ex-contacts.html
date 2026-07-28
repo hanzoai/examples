@@ -1,0 +1,124 @@
+<!--hz {"title":"Contacts","archetype":"CRM / address book","creator":"apps","desc":"Address book: alphabetical index, detail pane, tag segments, CSV import and export, and a duplicate finder that scores name and email similarity.","nav":[["#/","Contacts"],["#/dupes","Duplicates"],["#/import","Import"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Contacts</h1><span class="tag" id="kpi"></span>
+  <span class="spacer"></span>
+  <button id="export">Export CSV</button><button class="p" id="new">+ Contact</button>
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:16px">All contact records are synthetic; every address uses the reserved <code>.invalid</code> domain so nothing can be sent anywhere.</p>
+<script>
+const {h,fill,$,store,rng,range,pick,uid,fmt,avatar,grid,modal,toast,submit,route,wire} = hz;
+const r = rng(8642);
+const FIRST=['Ada','Grace','Ken','Barbara','Linus','Radia','Alan','Karen','Bjarne','Anita','Frances','Donald','Margaret','Edsger'];
+const LAST=['Lovelace','Hopper','Thompson','Liskov','Torvalds','Perlman','Kay','Sparck','Stroustrup','Borg','Allen','Knuth','Hamilton','Dijkstra'];
+const ORG=['Northwind','Cedarline','Ironleaf','Kestrel Data','Glasswing','Everpine'];
+const TAGS=['customer','prospect','partner','press','alumni'];
+const seed = range(30, i => {
+  const f = FIRST[i%FIRST.length], l = LAST[(i*3)%LAST.length];
+  return {id:uid(), first:f, last:l, email:(f+'.'+l).toLowerCase()+'@example.invalid',
+    org: pick(r,ORG), title: pick(r,['Head of Engineering','VP Data','CTO','Director, Ops','Designer','SRE']),
+    phone:'+1 555 01'+String(10+i).padStart(2,'0'), tag: pick(r,TAGS), at: Date.now()-Math.round(r()*300)*864e5};
+});
+// Two deliberate near-duplicates so the duplicate finder has something to find.
+seed.push({id:uid(), first:'Ada', last:'Lovelace', email:'ada.lovelace@example.invalid', org:'Northwind',
+  title:'Head of Engineering', phone:'+1 555 0110', tag:'customer', at:Date.now()});
+seed.push({id:uid(), first:'Grace', last:'Hopper', email:'g.hopper@example.invalid', org:'Cedarline',
+  title:'VP Data', phone:'+1 555 0111', tag:'prospect', at:Date.now()});
+const db = store('contacts', seed);
+const view = $('#view');
+let sel = null;
+
+function kpi(){ const d=db.get();
+  $('#kpi').textContent = d.length+' contacts · '+new Set(d.map(x=>x.org)).size+' organisations'; }
+const name = c => c.first+' '+c.last;
+function list(){
+  const d = db.get();
+  fill(view, h('div.split.r',
+    h('div.pane', grid([
+      {k:'last', t:'Name', cell:c=>h('div.row',{style:{gap:'9px'}}, avatar(name(c),28),
+        h('div',h('div.b',name(c)), h('div.small.muted',c.title)))},
+      {k:'org', t:'Organisation'},
+      {k:'tag', t:'Segment', cell:c=>h('span.tag.acc',c.tag)},
+      {k:'email', t:'Email', cell:c=>h('span.small.mono',c.email)},
+    ], d, {onRow:c=>{sel=c;list();}, placeholder:'Search name, org or email…'})),
+    sel ? detail(sel) : h('div.pane',h('div.empty','Select a contact to see their details.'))));
+}
+function detail(c){
+  return h('div.pane',
+    h('header','Contact', h('span.spacer'),
+      h('button.sm',{onclick:()=>edit(c)},'Edit'),
+      h('button.g.sm',{onclick:()=>{db.set(v=>v.filter(x=>x.id!==c.id)); sel=null; kpi(); list();}},'Delete')),
+    h('div.body',
+      h('div.row',{style:{gap:'12px',marginBottom:'14px'}}, avatar(name(c),52),
+        h('div', h('h2',{style:{margin:0}},name(c)), h('div.small.muted',c.title+' · '+c.org))),
+      h('table',h('tbody',
+        [['Email',c.email],['Phone',c.phone],['Organisation',c.org],['Segment',c.tag],
+         ['Added',fmt.date(c.at)]].map(([k,v])=>h('tr',h('td.small.muted',k),h('td.b',v)))))),
+    h('div.body',h('button.p',{style:{width:'100%'},onclick:async()=>{
+      try{ await submit('contacts.note',{contact:name(c), org:c.org}); toast('Interaction logged to @hanzo/base'); }
+      catch(e){ toast('Logged locally'); }}},'Log an interaction')));
+}
+function edit(c){
+  const f = {};
+  const row = (k,label,type) => h('div.field',h('label',label), f[k]=h('input',{value:c[k]??'',type:type||'text'}));
+  modal('Edit contact', h('div',
+    h('div.row',h('div',{style:{flex:1}},row('first','First name')),h('div',{style:{flex:1}},row('last','Last name'))),
+    row('email','Email','email'), row('phone','Phone'),
+    h('div.row',h('div',{style:{flex:1}},row('org','Organisation')),h('div',{style:{flex:1}},row('title','Title'))),
+    h('div.field',h('label','Segment'), f.tag = h('select',TAGS.map(t=>h('option',{selected:t===c.tag},t))))),
+    () => { const upd = Object.fromEntries(Object.entries(f).map(([k,el])=>[k,el.value]));
+      db.set(v=>v.map(x=>x.id===c.id?{...x,...upd}:x)); sel = db.get().find(x=>x.id===c.id); kpi(); list(); });
+}
+$('#new').onclick = () => { const c={id:uid(),first:'',last:'',email:'',org:'',title:'',phone:'',tag:'prospect',at:Date.now()};
+  db.set(v=>[c,...v]); kpi(); edit(c); };
+$('#export').onclick = () => {
+  const cols=['first','last','email','phone','org','title','tag'];
+  const csv=[cols.join(','), ...db.get().map(c=>cols.map(k=>c[k]).join(','))].join('\n');
+  h('a',{download:'contacts.csv',href:URL.createObjectURL(new Blob([csv],{type:'text/csv'}))}).click();
+  toast('Exported '+db.get().length+' contacts');
+};
+// Similarity: normalised edit distance over the name plus the email local part.
+function sim(a,b){
+  const s = (x,y) => { x=x.toLowerCase(); y=y.toLowerCase();
+    const m=Array.from({length:x.length+1},(_,i)=>[i,...Array(y.length).fill(0)]);
+    for(let j=0;j<=y.length;j++) m[0][j]=j;
+    for(let i=1;i<=x.length;i++) for(let j=1;j<=y.length;j++)
+      m[i][j]=Math.min(m[i-1][j]+1, m[i][j-1]+1, m[i-1][j-1]+(x[i-1]===y[j-1]?0:1));
+    return 1 - m[x.length][y.length]/Math.max(x.length,y.length,1); };
+  return 0.6*s(a.first+a.last, b.first+b.last) + 0.4*s(a.email.split('@')[0], b.email.split('@')[0]);
+}
+function dupes(){
+  const d = db.get(), pairs = [];
+  for(let i=0;i<d.length;i++) for(let j=i+1;j<d.length;j++){
+    const sc = sim(d[i],d[j]); if(sc>0.72) pairs.push({a:d[i], b:d[j], sc});
+  }
+  pairs.sort((x,y)=>y.sc-x.sc);
+  fill(view, h('div.pane',h('header','Possible duplicates · '+pairs.length),
+    pairs.length ? h('ul.list', pairs.map(p=>h('li',{style:{alignItems:'flex-start'}},
+        h('div',{style:{flex:1,minWidth:0}},h('div.b',name(p.a)),h('div.small.muted',p.a.email+' · '+p.a.org)),
+        h('div',{style:{flex:1,minWidth:0}},h('div.b',name(p.b)),h('div.small.muted',p.b.email+' · '+p.b.org)),
+        h('span.tag '+(p.sc>0.9?'bad':'warn'), (p.sc*100).toFixed(0)+'% match'),
+        h('button.sm',{onclick:()=>{
+          db.set(v=>v.filter(x=>x.id!==p.b.id)); kpi(); dupes(); toast('Merged — kept the first record'); }},'Merge'))))
+      : h('div.empty','No pairs scored above the 72% threshold.'),
+    h('div.body',h('p.hz-note',{style:{margin:0}},'Scoring is 60% normalised edit distance on the full name and 40% on the email local part. The threshold is deliberately visible so the result is explainable rather than magic.'))));
+}
+function importView(){
+  const ta = h('textarea',{style:{minHeight:'170px',fontFamily:'var(--mono)',fontSize:'12px'},
+    placeholder:'first,last,email,phone,org,title,tag'});
+  ta.value = 'first,last,email,phone,org,title,tag\nJean,Bartik,jean.bartik@example.invalid,+1 555 0199,Everpine,Engineer,alumni';
+  fill(view, h('div.pane',h('header','Import CSV'),h('div.body', ta,
+    h('div.row',{style:{marginTop:'10px'}},
+      h('button.p',{onclick:()=>{
+        const lines = ta.value.trim().split(/\r?\n/); const head = lines[0].split(',').map(s=>s.trim());
+        const rows = lines.slice(1).map(l=>{ const c=l.split(','); const o={id:uid(),at:Date.now()};
+          head.forEach((k,i)=>o[k]=(c[i]||'').trim()); return o; }).filter(o=>o.email);
+        if(!rows.length) return toast('Nothing to import');
+        db.set(v=>[...rows,...v]); kpi();
+        submit('contacts.import',{count:rows.length}).catch(()=>{});
+        toast('Imported '+rows.length+' contact'+(rows.length===1?'':'s')); location.hash='#/';
+      }},'Import'),
+      h('span.small.muted','The header row names the fields; unknown columns are kept as-is.')))));
+}
+route({'':()=>{kpi();list();}, 'dupes':()=>{kpi();dupes();}, 'import':()=>{kpi();importView();}, '*':()=>{kpi();list();}});
+</script>

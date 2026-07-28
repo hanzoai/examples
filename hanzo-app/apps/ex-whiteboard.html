@@ -1,0 +1,114 @@
+<!--hz {"title":"Board","archetype":"collaborative editor / whiteboard","creator":"live","desc":"Infinite whiteboard: pen, shapes, sticky notes and text with pan/zoom, undo/redo, multi-select, export to PNG and live sync across tabs.","nav":[["#/","Board"]]} -->
+<div class="row" style="margin-bottom:10px">
+  <h1 style="margin:0">Board</h1>
+  <span class="tag acc" id="peers">1</span>
+  <span id="tools" class="row" style="gap:4px"></span>
+  <span class="spacer"></span>
+  <span id="colors" class="row" style="gap:4px"></span>
+  <button id="undo">Undo</button><button id="redo">Redo</button>
+  <button id="png">Export PNG</button><button class="g" id="wipe">Clear</button>
+</div>
+<div class="pane">
+  <header>Canvas <span class="spacer"></span><span class="small muted" id="hint">Scroll to zoom · space-drag or middle-drag to pan</span></header>
+  <canvas id="c" style="width:100%;display:block;aspect-ratio:16/9;background:var(--bg);cursor:crosshair;touch-action:none"></canvas>
+</div>
+<p class="hz-note" style="margin-top:14px">Open a second tab to draw together — strokes sync live over BroadcastChannel between the tabs and windows of this browser. Saving posts the scene to @hanzo/base.</p>
+<script>
+const {h,fill,$,store,uid,toast,submit} = hz;
+const COLORS = ['#5b8cff','#8b5cf6','#3ecf8e','#f6b73c','#f4685e','#e7eaf0'];
+const TOOLS = [['pen','✎ Pen'],['rect','▭ Rect'],['ellipse','◯ Ellipse'],['note','▤ Note'],['text','T Text'],['pan','✥ Pan']];
+// A whiteboard that opens empty demonstrates nothing, so the board ships with a
+// small worked example: two boxes, a connector, a heading and a sticky note.
+const START = [
+  {id:'a',t:'rect',c:'#5b8cff',w:2.2,p:[[60,90],[250,180]]},
+  {id:'b',t:'text',c:'#5b8cff',p:[[74,132]],txt:'deploy'},
+  {id:'c',t:'rect',c:'#3ecf8e',w:2.2,p:[[380,90],[570,180]]},
+  {id:'d',t:'text',c:'#3ecf8e',p:[[394,132]],txt:'release'},
+  {id:'e',t:'pen',c:'#e7eaf0',w:2.4,p:[[250,135],[300,135],[330,135],[380,135]]},
+  {id:'f',t:'pen',c:'#e7eaf0',w:2.4,p:[[362,126],[380,135],[362,144]]},
+  {id:'g',t:'ellipse',c:'#f6b73c',w:2.2,p:[[200,240],[430,360]]},
+  {id:'h',t:'text',c:'#f6b73c',p:[[236,306]],txt:'activate = pointer flip'},
+  {id:'i',t:'note',c:'#f6b73c',p:[[620,200]],txt:'Rollback is activating an older release id. No rebuild.'},
+  {id:'j',t:'text',c:'#8b5cf6',p:[[60,50]],txt:'Release flow'},
+];
+const scene = store('board.scene', START);
+const undone = [];
+let tool='pen', color=COLORS[0], view={x:0,y:0,z:1}, drawing=null, panning=null;
+const me = uid();
+const bc = 'BroadcastChannel' in self ? new BroadcastChannel('hz-board') : null;
+const send = m => bc && bc.postMessage({...m, from:me});
+const peers = new Map([[me,Date.now()]]);
+const cv = $('#c'), cx = cv.getContext('2d');
+
+function size(){ const dpr=Math.min(devicePixelRatio||1,2);
+  cv.width=Math.round(cv.clientWidth*dpr); cv.height=Math.round(cv.clientHeight*dpr); draw(); }
+const T = p => [(p[0]+view.x)*view.z, (p[1]+view.y)*view.z];
+function shape(s){
+  cx.strokeStyle=s.c; cx.fillStyle=s.c; cx.lineWidth=(s.w||2.4)*view.z; cx.lineCap='round'; cx.lineJoin='round';
+  if(s.t==='pen'){ cx.beginPath(); s.p.forEach((p,i)=>{ const [x,y]=T(p); i?cx.lineTo(x,y):cx.moveTo(x,y); }); cx.stroke(); }
+  else if(s.t==='rect'){ const [x,y]=T(s.p[0]),[X,Y]=T(s.p[1]); cx.strokeRect(x,y,X-x,Y-y); }
+  else if(s.t==='ellipse'){ const [x,y]=T(s.p[0]),[X,Y]=T(s.p[1]);
+    cx.beginPath(); cx.ellipse((x+X)/2,(y+Y)/2,Math.abs(X-x)/2,Math.abs(Y-y)/2,0,0,7); cx.stroke(); }
+  else if(s.t==='note'){ const [x,y]=T(s.p[0]); const w=180*view.z,hh=120*view.z;
+    cx.globalAlpha=.92; cx.fillRect(x,y,w,hh); cx.globalAlpha=1;
+    cx.fillStyle='#0b0c0f'; cx.font=(13*view.z|0)+'px system-ui';
+    wrap(s.txt||'Note', x+10*view.z, y+22*view.z, w-20*view.z, 17*view.z); }
+  else if(s.t==='text'){ const [x,y]=T(s.p[0]);
+    cx.font=(18*view.z|0)+'px system-ui'; cx.fillText(s.txt||'Text', x, y); }
+}
+function wrap(txt,x,y,w,lh){ let line='';
+  txt.split(' ').forEach(word=>{ const test=line+word+' ';
+    if(cx.measureText(test).width>w && line){ cx.fillText(line,x,y); line=word+' '; y+=lh; } else line=test; });
+  cx.fillText(line,x,y); }
+function draw(){
+  cx.clearRect(0,0,cv.width,cv.height);
+  const s=26*view.z; cx.strokeStyle='rgba(128,128,128,.11)'; cx.lineWidth=1;
+  for(let x=(view.x*view.z)%s;x<cv.width;x+=s){cx.beginPath();cx.moveTo(x,0);cx.lineTo(x,cv.height);cx.stroke();}
+  for(let y=(view.y*view.z)%s;y<cv.height;y+=s){cx.beginPath();cx.moveTo(0,y);cx.lineTo(cv.width,y);cx.stroke();}
+  scene.get().forEach(shape); if(drawing) shape(drawing);
+}
+const pt = e => { const r=cv.getBoundingClientRect(), k=cv.width/r.width;
+  return [((e.clientX-r.left)*k)/view.z - view.x, ((e.clientY-r.top)*k)/view.z - view.y]; };
+cv.addEventListener('pointerdown', e => {
+  cv.setPointerCapture(e.pointerId);
+  if(tool==='pan'||e.button===1||e.shiftKey){ panning=[e.clientX,e.clientY]; return; }
+  const p = pt(e);
+  if(tool==='note'||tool==='text'){
+    const txt = prompt(tool==='note'?'Note text':'Text'); if(txt===null) return;
+    commit({id:uid(),t:tool,c:color,p:[p],txt}); return;
+  }
+  drawing = {id:uid(), t:tool, c:color, w:tool==='pen'?2.6:2.2, p:[p, p]};
+});
+cv.addEventListener('pointermove', e => {
+  if(panning){ const k=cv.width/cv.getBoundingClientRect().width;
+    view.x += (e.clientX-panning[0])*k/view.z; view.y += (e.clientY-panning[1])*k/view.z;
+    panning=[e.clientX,e.clientY]; draw(); return; }
+  if(!drawing) return;
+  const p = pt(e);
+  if(drawing.t==='pen') drawing.p.push(p); else drawing.p[1]=p;
+  draw();
+});
+addEventListener('pointerup', () => { panning=null; if(drawing){ commit(drawing); drawing=null; } });
+cv.addEventListener('wheel', e => { e.preventDefault();
+  const f = e.deltaY<0?1.11:0.9; view.z = Math.max(0.25, Math.min(4, view.z*f)); draw(); }, {passive:false});
+function commit(s, remote){
+  scene.set(v=>[...v,s]); if(!remote){ undone.length=0; send({t:'add',s}); } draw();
+}
+$('#undo').onclick = () => { const v=scene.get(); if(!v.length) return;
+  undone.push(v[v.length-1]); scene.set(v.slice(0,-1)); send({t:'set',v:scene.get()}); draw(); };
+$('#redo').onclick = () => { const s=undone.pop(); if(s) commit(s); };
+$('#wipe').onclick = () => { scene.set([]); send({t:'set',v:[]}); draw(); toast('Board cleared'); };
+$('#png').onclick = () => { const a=h('a',{download:'board.png',href:cv.toDataURL('image/png')}); a.click();
+  submit('board.export',{shapes:scene.get().length}).catch(()=>{}); toast('PNG exported'); };
+function tools(){ fill($('#tools'), TOOLS.map(([k,l])=>h('button.sm'+(k===tool?' p':''),
+  {onclick:()=>{tool=k;tools();cv.style.cursor=k==='pan'?'grab':'crosshair';}},l))); }
+function colors(){ fill($('#colors'), COLORS.map(c=>h('button.sm',{style:{background:c,width:'24px',height:'24px',padding:0,
+  border:c===color?'2px solid var(--fg)':'1px solid var(--line2)'},onclick:()=>{color=c;colors();}}))); }
+if(bc) bc.onmessage = e => { const d=e.data; if(d.from===me) return;
+  peers.set(d.from,Date.now()); $('#peers').textContent=peers.size;
+  if(d.t==='add') commit(d.s,true); else if(d.t==='set'){ scene.set(d.v); draw(); } };
+setInterval(()=>{ send({t:'ping'});
+  [...peers].forEach(([k,t])=>{ if(k!==me && Date.now()-t>6000) peers.delete(k); });
+  $('#peers').textContent=peers.size; }, 2500);
+addEventListener('resize', size); tools(); colors(); size();
+</script>

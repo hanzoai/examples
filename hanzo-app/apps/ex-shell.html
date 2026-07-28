@@ -1,0 +1,119 @@
+<!--hz {"title":"Shell","archetype":"devtool / CLI companion","creator":"data","desc":"Browser terminal for a fictional deploy CLI: real command parsing, tab completion, history, piping into a JSON filter and a virtual project state the commands actually mutate.","nav":[["#/","Terminal"]]} -->
+<div class="split r">
+  <div class="pane" style="display:flex;flex-direction:column;height:min(76vh,720px)">
+    <header>hz — deploy CLI <span class="spacer"></span><span class="small muted">Tab completes · ↑↓ history · try <code>help</code></span></header>
+    <div id="out" style="flex:1;overflow:auto;padding:14px;font-family:var(--mono);font-size:13px;line-height:1.55"></div>
+    <form id="f" style="display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--line);align-items:center">
+      <span class="mono" style="color:var(--ok)">~/app $</span>
+      <input id="cmd" autocomplete="off" spellcheck="false" style="border:0;background:transparent;font-family:var(--mono);padding:0">
+    </form>
+  </div>
+  <div class="col">
+    <div class="pane"><header>Project state</header><div class="body" id="state"></div></div>
+    <div class="pane"><header>Commands</header><ul class="list" id="cmds"></ul></div>
+  </div>
+</div>
+<script>
+const {h,fill,$,store,uid,fmt,submit,toast} = hz;
+const st = store('shell.state', {
+  slug:'my-app', name:'My app', framework:'static',
+  releases:[{id:'rel_4f8a1c', at:Date.now()-6*36e5, files:12, active:true},
+            {id:'rel_1b93de', at:Date.now()-30*36e5, files:11, active:false}],
+  domains:['my-app.hanzo.app'], env:{NODE_ENV:'production'},
+});
+const hist = store('shell.hist', []);
+const out = $('#out');
+let hi = -1;
+
+const CMDS = {
+  help:['','List every command'],
+  status:['','Show the project, active release and bound domains'],
+  releases:['[--json]','List releases, newest first'],
+  deploy:['<dir>','Create a release from a directory and activate it'],
+  rollback:['<release-id>','Activate an earlier release'],
+  domains:['add|rm <host>','Bind or unbind a custom domain'],
+  env:['set|unset KEY[=VALUE]','Read or change environment values'],
+  logs:['[-n N]','Print the most recent deployment log lines'],
+  open:['','Print the live URL'],
+  clear:['','Clear the terminal'],
+};
+const line = (t,cls) => out.append(h('div',{className:cls||'',style:{whiteSpace:'pre-wrap'}},t));
+const ok = t => line(t,''), dim = t => line(t,'muted'), bad = t => line(t,'down');
+function table(rows){ const w = rows[0].map((_,i)=>Math.max(...rows.map(r=>String(r[i]).length)));
+  rows.forEach((r,ri)=>line(r.map((c,i)=>String(c).padEnd(w[i]+2)).join(''), ri?'':'muted')); }
+
+const RUN = {
+  help(){ dim('Commands:'); Object.entries(CMDS).forEach(([k,[a,d]])=>
+    line('  '+(k+' '+a).padEnd(26)+d)); },
+  status(){ const s=st.get(), a=s.releases.find(r=>r.active);
+    table([['FIELD','VALUE'],['project',s.slug],['name',s.name],['framework',s.framework],
+      ['active release',a?a.id:'none'],['files',a?a.files:0],['domains',s.domains.join(', ')],
+      ['env keys',Object.keys(s.env).join(', ')||'—']]); },
+  releases(args){ const s=st.get();
+    if(args.includes('--json')) return line(JSON.stringify(s.releases,null,2));
+    table([['RELEASE','CREATED','FILES','STATE'],
+      ...s.releases.map(r=>[r.id, fmt.ago(r.at), r.files, r.active?'active':''])]); },
+  deploy(args){ const dir = args[0]||'.';
+    const id = 'rel_'+Math.random().toString(16).slice(2,8);
+    const files = 8+Math.floor(Math.random()*20);
+    dim('packing '+dir+' …'); dim('uploading '+files+' files …');
+    st.set(s=>({...s, releases:[{id,at:Date.now(),files,active:true},
+      ...s.releases.map(r=>({...r,active:false}))]}));
+    ok('created  '+id); ok('activated '+id);
+    ok('live at  https://'+st.get().slug+'.hanzo.app');
+    submit('shell.deploy',{release:id,files}).catch(()=>{}); },
+  rollback(args){ const id=args[0]; const s=st.get();
+    if(!id) return bad('usage: rollback <release-id>');
+    if(!s.releases.some(r=>r.id===id)) return bad('no such release: '+id);
+    st.set(v=>({...v, releases:v.releases.map(r=>({...r,active:r.id===id}))}));
+    ok('activated '+id+'  (pointer flip, no rebuild)'); },
+  domains(args){ const s=st.get();
+    if(!args.length) return s.domains.forEach(d=>line('  '+d));
+    const [op,host]=args;
+    if(op==='add'&&host){ st.set(v=>({...v,domains:[...v.domains,host]})); ok('bound '+host+' — add the verification record to finish'); }
+    else if(op==='rm'&&host){ st.set(v=>({...v,domains:v.domains.filter(d=>d!==host)})); ok('unbound '+host); }
+    else bad('usage: domains add|rm <host>'); },
+  env(args){ const s=st.get();
+    if(!args.length) return Object.entries(s.env).forEach(([k,v])=>line('  '+k+'='+v));
+    const [op,kv]=args;
+    if(op==='set'&&kv?.includes('=')){ const [k,v]=kv.split('='); st.set(x=>({...x,env:{...x.env,[k]:v}})); ok('set '+k); }
+    else if(op==='unset'&&kv){ st.set(x=>{const e={...x.env}; delete e[kv]; return {...x,env:e};}); ok('unset '+kv); }
+    else bad('usage: env set KEY=VALUE | env unset KEY'); },
+  logs(args){ const n = +(args[args.indexOf('-n')+1]||8);
+    for(let i=n;i>0;i--) dim(new Date(Date.now()-i*4200).toISOString()+
+      '  '+['GET / 200 12ms','GET /hz.js 200 4ms','POST /v1/base/... 200 21ms','GET /favicon 204 2ms'][i%4]); },
+  open(){ ok('https://'+st.get().slug+'.hanzo.app'); },
+  clear(){ fill(out); },
+};
+function exec(raw){
+  const s = raw.trim(); if(!s) return;
+  line('~/app $ '+s, 'b');
+  hist.set(v=>[s,...v.filter(x=>x!==s)].slice(0,40));
+  const [cmd,...args] = s.split(/\s+/);
+  if(!RUN[cmd]) bad(cmd+': command not found — try `help`');
+  else try { RUN[cmd](args); } catch(e){ bad(String(e.message)); }
+  render(); out.scrollTop = out.scrollHeight;
+}
+$('#f').onsubmit = e => { e.preventDefault(); exec($('#cmd').value); $('#cmd').value=''; hi=-1; };
+$('#cmd').addEventListener('keydown', e => {
+  if(e.key==='Tab'){ e.preventDefault();
+    const v=e.target.value, m=Object.keys(CMDS).filter(k=>k.startsWith(v));
+    if(m.length===1) e.target.value=m[0]+' '; else if(m.length>1){ line('  '+m.join('  '),'muted'); } }
+  if(e.key==='ArrowUp'){ e.preventDefault(); const hs=hist.get(); hi=Math.min(hi+1,hs.length-1); if(hs[hi])e.target.value=hs[hi]; }
+  if(e.key==='ArrowDown'){ e.preventDefault(); hi=Math.max(hi-1,-1); e.target.value=hi<0?'':hist.get()[hi]; }
+  if(e.key==='l'&&e.ctrlKey){ e.preventDefault(); fill(out); }
+});
+function render(){
+  const s = st.get(), a = s.releases.find(r=>r.active);
+  fill($('#state'), h('table',h('tbody',
+    [['slug',s.slug],['active',a?a.id:'—'],['files',a?a.files:0],
+     ['releases',s.releases.length],['domains',s.domains.length],['env',Object.keys(s.env).length]]
+    .map(([k,v])=>h('tr',h('td.small.muted',k),h('td.num.b',String(v)))))),
+    h('p.hz-note',{style:{marginTop:'10px'}},'This state is a local simulation of a project. Commands mutate it for real; nothing is deployed to the platform from here.'));
+}
+fill($('#cmds'), Object.entries(CMDS).map(([k,[a,d]])=>h('li',{style:{cursor:'pointer'},
+  onclick:()=>{ $('#cmd').value=k+(a?' ':''); $('#cmd').focus(); }},
+  h('div',h('div.mono.small.b',k+' '+a),h('div.small.muted',d)))));
+dim('hz — deploy CLI (demonstration). Type `help` for commands.');
+RUN.status(); render(); $('#cmd').focus();
+</script>

@@ -1,0 +1,116 @@
+<!--hz {"title":"Course","archetype":"learning platform (LMS)","creator":"web","desc":"Course player: module outline with completion state, lesson reader, an inline quiz that grades and explains, progress persistence and a certificate view once every module is complete.","nav":[["#/","Course"],["#/progress","Progress"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Deploying, end to end</h1>
+  <span class="tag acc" id="pct">0%</span>
+  <span class="spacer"></span>
+  <button class="g" id="reset">Reset progress</button>
+</div>
+<div id="view"></div>
+<script>
+const {h,fill,$,store,fmt,toast,submit,route,esc} = hz;
+const COURSE = [
+ {id:'m1', t:'What a deploy actually is', min:6, body:
+  "A deploy moves a set of bytes from where you made them to where people read them.\n\nEverything else — build servers, queues, caches — is machinery in service of that sentence. When you strip the machinery away, a deploy is a manifest: a list of paths and the contents of each one.\n\n## Why the manifest matters\nA manifest is a **value**. It can be hashed, compared, stored and replayed. A build pipeline is a **process**: it can only be re-run and hoped over. Preferring the value is what makes the rest of this course possible.",
+  quiz:{q:'Why is a manifest preferable to a build process as the unit of deployment?',
+    a:['It is faster to upload','It is a value, so it can be hashed, compared and replayed','It uses less storage','It avoids needing a CDN'],
+    correct:1, why:'A value can be addressed and compared. A process can only be re-run, which is why "the same build twice" is a hope rather than a guarantee.'}},
+ {id:'m2', t:'Content addressing', min:8, body:
+  "If the id of a release is the digest of its manifest, two things follow immediately.\n\nFirst, publishing identical content twice produces one release, not two. Second, a release id is a claim about content that anyone can verify.\n\n## The practical consequence\nYou stop needing a build number, a tag convention or a spreadsheet. The id **is** the content.",
+  quiz:{q:'You publish the same files twice. How many releases exist?',
+    a:['Two, one per publish','One, because the digest is identical','Two, but the second is marked duplicate','It depends on the timestamp'],
+    correct:1, why:'The id is derived from the content, so the second publish resolves to the release that already exists.'}},
+ {id:'m3', t:'Atomic activation', min:5, body:
+  "Serving is a pointer. Activation moves it.\n\nBecause the move is atomic, a reader sees either the whole old release or the whole new one — never half of each. This is the property that makes partial-deploy bugs impossible rather than unlikely.\n\n## What it rules out\nNo more \"the HTML updated before the bundle did\". No more cache keys that straddle two versions.",
+  quiz:{q:'What class of bug does atomic activation eliminate?',
+    a:['Slow cold starts','Readers seeing a mixture of two releases','Certificate expiry','Rate limiting'],
+    correct:1, why:'Atomicity is precisely the guarantee that no reader observes an intermediate state.'}},
+ {id:'m4', t:'Rollback', min:4, body:
+  "A rollback is an activation of an earlier id.\n\nThat is the whole procedure. Nothing is rebuilt, nothing is re-uploaded, and recovery time no longer depends on build time.\n\n## The test\nIf your rollback requires a rebuild, you do not have a rollback — you have a forward deploy of older source, which can fail for new reasons at the worst possible moment.",
+  quiz:{q:'What is the tell that a "rollback" is not really one?',
+    a:['It takes more than a second','It requires a rebuild','It changes the URL','It needs approval'],
+    correct:1, why:'A rebuild reintroduces every failure mode of a normal deploy at exactly the moment you least want them.'}},
+ {id:'m5', t:'Data without a backend', min:7, body:
+  "A published page can hold no credential, so any data path that needs one is unavailable to it.\n\nThe way out is to serve the data plane on the page's **own origin** and to set collection rules such that create is open and read is not. An anonymous form works; an anonymous reader learns nothing.\n\n## The rule of thumb\nOpen create with closed read bounds the blast radius to storage rather than disclosure.",
+  quiz:{q:'Why is "open create, closed read" a defensible default?',
+    a:['It is simpler to implement','It bounds the risk to storage rather than disclosure','It removes the need for rate limits','It makes reads faster'],
+    correct:1, why:'An attacker can waste space, which is recoverable. They cannot read other people’s submissions, which would not be.'}},
+];
+const done = store('course.done', {});
+const answers = store('course.answers', {});
+const view = $('#view');
+const md = s => esc(s).replace(/^## (.+)$/gm,'<h2>$1</h2>').replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')
+  .split(/\n\n+/).map(p=>p.startsWith('<h2')?p:'<p>'+p.replace(/\n/g,'<br>')+'</p>').join('');
+const pct = () => Math.round(Object.values(done.get()).filter(Boolean).length / COURSE.length * 100);
+function head(){ $('#pct').textContent = pct()+'% complete'; }
+
+function outline(active){
+  return h('div.pane', h('header','Modules'),
+    h('ul.list', COURSE.map((m,i)=>h('li',{style:{cursor:'pointer',background:m.id===active?'var(--bg3)':''},
+      onclick:()=>{location.hash='#/m/'+m.id;}},
+      h('span',{style:{width:'22px',color: done.get()[m.id]?'var(--ok)':'var(--fg3)'}}, done.get()[m.id]?'✓':(i+1)),
+      h('div',{style:{minWidth:0}}, h('div.small.b',m.t), h('div.small.muted',m.min+' min read')),
+      h('span.spacer'), done.get()[m.id]? h('span.tag.ok','done'):null))),
+    h('div.body', h('div.bar', h('i',{style:{width:pct()+'%'}})),
+      h('div.small.muted',{style:{marginTop:'6px'}}, pct()+'% complete')));
+}
+function lesson(id){
+  const i = COURSE.findIndex(m=>m.id===id), m = COURSE[i] || COURSE[0];
+  const picked = answers.get()[m.id];
+  const opts = h('div.col',{style:{gap:'6px'}}, m.quiz.a.map((a,ai)=>h('button',{
+    className: picked===undefined ? '' : (ai===m.quiz.correct ? 'p' : ai===picked ? 'g' : ''),
+    style:{justifyContent:'flex-start', borderColor: picked!==undefined && ai===picked && ai!==m.quiz.correct ? 'var(--bad)':''},
+    onclick:()=>{ if(picked!==undefined) return;
+      answers.set(v=>({...v,[m.id]:ai}));
+      if(ai===m.quiz.correct){ done.set(v=>({...v,[m.id]:true})); toast('Correct'); }
+      else toast('Not quite — the explanation is below');
+      head(); lesson(id);
+      submit('course.answer',{module:m.id, correct: ai===m.quiz.correct}).catch(()=>{}); }},
+    String.fromCharCode(65+ai)+'.  '+a)));
+  fill(view, h('div.split',
+    outline(m.id),
+    h('div.col',
+      h('article.pane', h('div.body',
+        h('div.small.muted','Module '+(i+1)+' of '+COURSE.length+' · '+m.min+' min'),
+        h('h1',m.t), h('div',{html:md(m.body)}))),
+      h('div.pane', h('header','Check your understanding'),
+        h('div.body', h('p.b',m.quiz.q), opts,
+          picked!==undefined ? h('div.card.tight',{style:{marginTop:'12px',
+            borderColor: picked===m.quiz.correct?'#3ecf8e55':'#f6b73c55'}},
+            h('div.b', picked===m.quiz.correct?'Correct':'Answer: '+String.fromCharCode(65+m.quiz.correct)),
+            h('p.small',{style:{margin:'6px 0 0'}}, m.quiz.why),
+            picked!==m.quiz.correct ? h('button.sm',{style:{marginTop:'8px'},
+              onclick:()=>{ answers.set(v=>{const n={...v}; delete n[m.id]; return n;}); lesson(id); }},'Try again') : null) : null)),
+      h('div.row',
+        i>0 ? h('a.btn',{href:'#/m/'+COURSE[i-1].id},'‹ '+COURSE[i-1].t) : h('span'),
+        h('span.spacer'),
+        i<COURSE.length-1 ? h('a.btn.p',{href:'#/m/'+COURSE[i+1].id},COURSE[i+1].t+' ›')
+          : h('a.btn.p',{href:'#/progress'},'Finish ›')))));
+  scrollTo({top:0});
+}
+function progress(){
+  const complete = pct()===100;
+  fill(view, h('div.split', outline(null),
+    h('div.col',
+      h('div.pane',h('header','Your progress'),
+        h('table', h('thead',h('tr',h('th','Module'),h('th','Quiz'),h('th','State'))),
+          h('tbody', COURSE.map(m=>{
+            const a = answers.get()[m.id];
+            return h('tr', h('td.b',m.t),
+              h('td', a===undefined? h('span.muted','not attempted')
+                : a===m.quiz.correct? h('span.tag.ok','correct') : h('span.tag.bad','incorrect')),
+              h('td', done.get()[m.id]? h('span.tag.ok','complete') : h('span.tag','open')));
+          })))),
+      complete ? h('div.pane',h('header','Certificate'),h('div.body',{style:{textAlign:'center',padding:'34px'}},
+          h('div',{style:{fontSize:'40px'}},'✦'),
+          h('h2','Course complete'),
+          h('p','Every module has been read and every quiz answered correctly.'),
+          h('p.hz-note','This is a demonstration certificate from an official Hanzo example. It is not an accredited credential and carries no external validity.')))
+        : h('div.pane',h('div.body',
+            h('p.small.muted','Answer every quiz correctly to unlock the certificate view. '+
+              Object.values(done.get()).filter(Boolean).length+' of '+COURSE.length+' modules complete.'))))));
+}
+$('#reset').onclick = () => { done.set({}); answers.set({}); head();
+  location.hash.includes('progress')? progress() : lesson(COURSE[0].id); toast('Progress reset'); };
+route({'':()=>{head();lesson(COURSE[0].id);}, 'm/:id':a=>{head();lesson(a.id);},
+       'progress':()=>{head();progress();}, '*':()=>{head();lesson(COURSE[0].id);}});
+</script>

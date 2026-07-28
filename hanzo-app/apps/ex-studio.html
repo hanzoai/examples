@@ -1,0 +1,155 @@
+<!--hz {"title":"Sound","archetype":"audio / media player","creator":"gfx","desc":"Web Audio workstation: a synthesised track built from oscillators and noise, transport controls, a real-time FFT spectrum and waveform, per-band mixer, and a step sequencer you can play.","nav":[["#/","Player"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Sound</h1><span class="tag" id="state">stopped</span>
+  <span class="spacer"></span>
+  <button class="p" id="play">▶ Play</button><button id="stop">■ Stop</button>
+  <label class="small muted">Master <input id="vol" type="range" min="0" max="1" step="0.01" value="0.5" style="width:110px;vertical-align:middle"></label>
+</div>
+<div class="split r">
+  <div class="col">
+    <div class="pane"><header>Spectrum <span class="spacer"></span><span class="small muted" id="hz">—</span></header>
+      <canvas id="fft" style="width:100%;height:170px;display:block;background:var(--bg)"></canvas></div>
+    <div class="pane"><header>Waveform</header>
+      <canvas id="wav" style="width:100%;height:110px;display:block;background:var(--bg)"></canvas></div>
+    <div class="pane"><header>Sequencer <span class="spacer"></span><span class="small muted">Click a cell, then Play</span></header>
+      <div class="body scroll-x" id="seq"></div></div>
+  </div>
+  <div class="col">
+    <div class="pane"><header>Mixer</header><div class="body col" id="mix"></div></div>
+    <div class="pane"><header>Keyboard</header><div class="body"><div id="keys" class="row" style="gap:3px"></div>
+      <p class="hz-note" style="margin-top:10px">Press A–K on your keyboard or click the pads. Every sound is synthesised live by the Web Audio API — there is no audio file on this page.</p></div></div>
+  </div>
+</div>
+<script>
+const {h,fill,$,store,fmt,toast,submit} = hz;
+const TRACKS = [['Kick',0],['Snare',1],['Hat',2],['Bass',3],['Lead',4]];
+const STEPS = 16;
+const pat = store('sound.pattern', [
+  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,1,0],
+  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+  [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,1],
+  [1,0,0,1, 0,0,1,0, 1,0,0,1, 0,0,1,0],
+  [0,0,1,0, 0,1,0,0, 0,0,1,0, 0,1,0,1],
+]);
+const gains = store('sound.gains', [0.9,0.6,0.35,0.7,0.45]);
+const NOTES = {a:261.63,w:277.18,s:293.66,e:311.13,d:329.63,f:349.23,t:369.99,g:392.0,y:415.3,h:440.0,u:466.16,j:493.88,k:523.25};
+let ac, master, analyser, playing=false, step=0, timer, tempo=112;
+
+function ensure(){
+  if(ac) return;
+  ac = new (window.AudioContext||window.webkitAudioContext)();
+  master = ac.createGain(); master.gain.value = +$('#vol').value;
+  analyser = ac.createAnalyser(); analyser.fftSize = 2048;
+  master.connect(analyser); analyser.connect(ac.destination);
+  draw();
+}
+function env(node, g, a, d){ const t=ac.currentTime;
+  node.gain.setValueAtTime(0.0001,t); node.gain.exponentialRampToValueAtTime(Math.max(g,0.0002), t+a);
+  node.gain.exponentialRampToValueAtTime(0.0001, t+a+d); }
+function noise(dur){
+  const n = ac.createBufferSource();
+  const buf = ac.createBuffer(1, ac.sampleRate*dur, ac.sampleRate);
+  const d = buf.getChannelData(0);
+  for(let i=0;i<d.length;i++) d[i] = (Math.random()*2-1) * (1 - i/d.length);
+  n.buffer = buf; return n;
+}
+function hit(track){
+  ensure(); const g = ac.createGain(); g.connect(master); const gv = gains.get()[track];
+  if(track===0){ const o=ac.createOscillator(); o.type='sine';
+    o.frequency.setValueAtTime(150, ac.currentTime);
+    o.frequency.exponentialRampToValueAtTime(45, ac.currentTime+0.14);
+    env(g, gv, 0.005, 0.18); o.connect(g); o.start(); o.stop(ac.currentTime+0.22); }
+  else if(track===1){ const n=noise(0.2), f=ac.createBiquadFilter(); f.type='highpass'; f.frequency.value=1400;
+    env(g, gv*0.9, 0.004, 0.14); n.connect(f); f.connect(g); n.start(); }
+  else if(track===2){ const n=noise(0.06), f=ac.createBiquadFilter(); f.type='highpass'; f.frequency.value=7000;
+    env(g, gv*0.55, 0.002, 0.045); n.connect(f); f.connect(g); n.start(); }
+  else if(track===3){ const o=ac.createOscillator(); o.type='triangle';
+    o.frequency.value = [65.4,73.4,87.3,98.0][step%4];
+    env(g, gv, 0.01, 0.22); o.connect(g); o.start(); o.stop(ac.currentTime+0.3); }
+  else { const o=ac.createOscillator(); o.type='sawtooth';
+    o.frequency.value = [523.25,392,440,659.25][(step/2|0)%4];
+    const f=ac.createBiquadFilter(); f.type='lowpass'; f.frequency.value=2200; f.Q.value=6;
+    env(g, gv*0.5, 0.01, 0.2); o.connect(f); f.connect(g); o.start(); o.stop(ac.currentTime+0.26); }
+}
+function note(freq){
+  ensure(); const o=ac.createOscillator(), g=ac.createGain(), f=ac.createBiquadFilter();
+  o.type='sawtooth'; o.frequency.value=freq; f.type='lowpass'; f.frequency.value=freq*4; f.Q.value=3;
+  env(g, 0.32, 0.01, 0.5); o.connect(f); f.connect(g); g.connect(master); o.start(); o.stop(ac.currentTime+0.6);
+}
+function tick(){
+  const p = pat.get();
+  TRACKS.forEach(([,i])=>{ if(p[i][step]) hit(i); });
+  seq();
+  step = (step+1)%STEPS;
+}
+$('#play').onclick = async () => { ensure(); await ac.resume();
+  if(playing) return; playing=true; $('#state').textContent='playing'; $('#state').className='tag ok';
+  timer = setInterval(tick, 60000/tempo/4); tick();
+  submit('sound.play',{tempo}).catch(()=>{}); };
+$('#stop').onclick = () => { playing=false; clearInterval(timer); step=0; seq();
+  $('#state').textContent='stopped'; $('#state').className='tag'; };
+$('#vol').oninput = e => { if(master) master.gain.value = +e.target.value; };
+function seq(){
+  const p = pat.get();
+  fill($('#seq'), h('div',{style:{display:'grid',gridTemplateColumns:'70px repeat('+STEPS+',1fr)',gap:'3px',minWidth:'560px'}},
+    TRACKS.flatMap(([n,i])=>[
+      h('div.small.muted',{style:{alignSelf:'center'}},n),
+      ...Array.from({length:STEPS},(_,s)=>h('button',{
+        style:{padding:'0',height:'26px',borderRadius:'5px',
+          background: p[i][s] ? 'var(--acc)' : (s%4===0?'var(--bg3)':'var(--bg)'),
+          borderColor: (playing && s===(step-1+STEPS)%STEPS) ? 'var(--warn)' : 'var(--line)',
+          borderWidth: (playing && s===(step-1+STEPS)%STEPS) ? '2px' : '1px'},
+        onclick:()=>{ pat.set(v=>v.map((row,ri)=>ri!==i?row:row.map((c,ci)=>ci===s?(c?0:1):c))); seq(); hit(i); }}))
+    ])));
+}
+function mix(){
+  fill($('#mix'), TRACKS.map(([n,i])=>h('div.field',{style:{margin:0}},
+    h('label', n+' · '+(gains.get()[i]*100|0)+'%'),
+    h('div.inline', h('input',{type:'range',min:0,max:1,step:0.01,value:gains.get()[i],
+        oninput:e=>{ gains.set(v=>v.map((g,gi)=>gi===i?+e.target.value:g)); mix(); }}),
+      h('button.sm',{onclick:()=>hit(i)},'▸')))),
+    h('div.field',{style:{margin:0}}, h('label','Tempo · '+tempo+' bpm'),
+      h('input',{type:'range',min:70,max:170,value:tempo,oninput:e=>{ tempo=+e.target.value; mix();
+        if(playing){ clearInterval(timer); timer=setInterval(tick,60000/tempo/4); } }})),
+    h('button.g',{onclick:()=>{pat.reset();gains.reset();seq();mix();toast('Pattern reset');}},'Reset pattern'));
+}
+fill($('#keys'), Object.entries(NOTES).map(([k,f])=>h('button.sm',{
+  style:{minWidth:'34px',justifyContent:'center', background: k.match(/[wetyu]/)?'var(--bg)':''},
+  onclick:()=>note(f)}, k.toUpperCase())));
+addEventListener('keydown', e => { if(e.repeat||document.activeElement.tagName==='INPUT') return;
+  const f = NOTES[e.key.toLowerCase()]; if(f) note(f); });
+function draw(){
+  const f=$('#fft'), w=$('#wav'), fx=f.getContext('2d'), wx=w.getContext('2d');
+  const freq=new Uint8Array(analyser.frequencyBinCount), time=new Uint8Array(analyser.fftSize);
+  (function loop(){
+    requestAnimationFrame(loop);
+    const dpr=Math.min(devicePixelRatio||1,2);
+    [f,w].forEach(c=>{ if(c.width!==c.clientWidth*dpr){c.width=c.clientWidth*dpr;c.height=c.clientHeight*dpr;} });
+    analyser.getByteFrequencyData(freq); analyser.getByteTimeDomainData(time);
+    fx.clearRect(0,0,f.width,f.height);
+    // dB grid: the analyser reads silence when stopped, so the axis is what
+    // makes the panel legible before the first note rather than a black box.
+    fx.strokeStyle='rgba(128,128,128,.20)'; fx.lineWidth=1;
+    for(let i=1;i<5;i++){ const y=f.height*i/5; fx.beginPath(); fx.moveTo(0,y); fx.lineTo(f.width,y); fx.stroke(); }
+    fx.fillStyle='rgba(128,128,138,.55)'; fx.font=(11*dpr)+'px system-ui';
+    ['0','−12','−24','−36','−48'].forEach((t,i)=>fx.fillText(t+' dB', 5*dpr, (i? f.height*i/5:12*dpr)-3*dpr));
+    const bins = 96, bw = f.width/bins;
+    for(let i=0;i<bins;i++){
+      const v = freq[Math.floor(Math.pow(i/bins,1.6)*freq.length*0.7)]/255;
+      fx.fillStyle = `hsl(${212 + v*110} 72% ${28+v*42}%)`;
+      fx.fillRect(i*bw+1, f.height-v*f.height, bw-2, v*f.height);
+    }
+    const peak = freq.indexOf(Math.max(...freq));
+    $('#hz').textContent = ac ? fmt.n(peak*ac.sampleRate/analyser.fftSize)+' Hz peak' : '—';
+    wx.clearRect(0,0,w.width,w.height);
+    wx.beginPath(); wx.strokeStyle='#3ecf8e'; wx.lineWidth=2*dpr;
+    for(let i=0;i<time.length;i++){ const x=i/time.length*w.width, y=(time[i]/128-1)*w.height*0.45+w.height/2;
+      i?wx.lineTo(x,y):wx.moveTo(x,y); }
+    wx.stroke();
+  })();
+}
+// Build the graph up front (the context starts suspended, so nothing sounds)
+// so the spectrum and waveform panels are live before the first press of Play.
+try { ensure(); } catch(e) { $('#hz').textContent = 'Web Audio unavailable'; }
+seq(); mix();
+</script>

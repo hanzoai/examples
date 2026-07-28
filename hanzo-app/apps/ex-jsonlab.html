@@ -1,0 +1,112 @@
+<!--hz {"title":"JSON Lab","archetype":"devtool","creator":"data","desc":"JSON workbench: collapsible tree, JSONPath-style query, structural diff between two documents, schema inference, minify/format and byte accounting.","nav":[["#/","Explore"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">JSON Lab</h1><span class="tag" id="stat">—</span>
+  <span class="spacer"></span>
+  <span id="tabs" class="row" style="gap:4px"></span>
+  <button id="fmt">Format</button><button id="min">Minify</button><button id="load">Load sample</button>
+</div>
+<div class="split">
+  <div class="col">
+    <div class="pane"><header>Document A</header><div class="body">
+      <textarea id="a" spellcheck="false" style="min-height:200px;font-family:var(--mono);font-size:12px"></textarea></div></div>
+    <div class="pane" id="bpane" style="display:none"><header>Document B</header><div class="body">
+      <textarea id="b" spellcheck="false" style="min-height:200px;font-family:var(--mono);font-size:12px"></textarea></div></div>
+    <div class="pane"><header>Query</header><div class="body">
+      <input id="q" placeholder="e.g. releases[0].id  ·  domains  ·  usage.api" style="font-family:var(--mono)">
+      <pre id="qout" style="margin-top:10px;max-height:180px;overflow:auto"></pre></div></div>
+  </div>
+  <div class="pane"><header id="rh">Tree</header><div class="body" id="right" style="max-height:70vh;overflow:auto"></div></div>
+</div>
+<script>
+const {h,fill,$,fmt,tabs,toast,submit} = hz;
+const SAMPLE = {
+  project:'my-app', framework:'static', createdAt:'2026-05-02T11:04:00Z',
+  domains:['my-app.hanzo.app','example.invalid'],
+  releases:[{id:'rel_4f8a1c',files:12,bytes:284913,active:true},
+            {id:'rel_1b93de',files:11,bytes:271004,active:false}],
+  usage:{api:1842300, deploys:412, bandwidthGb:268, base:{records:74120, collections:1}},
+  flags:{analytics:true, chat:true, preview:false},
+};
+const SAMPLE_B = JSON.parse(JSON.stringify(SAMPLE));
+SAMPLE_B.usage.deploys = 480; SAMPLE_B.flags.preview = true;
+SAMPLE_B.domains = ['my-app.hanzo.app']; delete SAMPLE_B.framework; SAMPLE_B.region = 'sfo3';
+SAMPLE_B.releases[0].files = 13;
+let mode = 'Tree';
+$('#a').value = JSON.stringify(SAMPLE,null,2);
+$('#b').value = JSON.stringify(SAMPLE_B,null,2);
+
+const parse = id => { try { return [JSON.parse($(id).value), null]; } catch(e){ return [null, e.message]; } };
+function node(k, v, depth){
+  const t = v===null?'null':Array.isArray(v)?'array':typeof v;
+  if(t!=='object' && t!=='array')
+    return h('div',{style:{paddingLeft:(depth*14)+'px'}},
+      h('span.mono.small',{style:{color:'var(--acc)'}}, k), h('span.mono.small.muted',': '),
+      h('span.mono.small',{style:{color:t==='string'?'var(--ok)':t==='number'?'var(--warn)':'var(--fg2)'}},
+        t==='string'?JSON.stringify(v):String(v)));
+  const kids = Object.entries(v);
+  const box = h('div');
+  const head = h('div',{style:{paddingLeft:(depth*14)+'px',cursor:'pointer'},
+    onclick:()=>{ box.style.display = box.style.display==='none'?'':'none';
+      head.firstChild.textContent = box.style.display==='none'?'▸ ':'▾ '; }},
+    h('span.mono.small.muted','▾ '), h('span.mono.small',{style:{color:'var(--acc)'}},k),
+    h('span.mono.small.muted', ' '+(t==='array'?'['+kids.length+']':'{'+kids.length+'}')));
+  kids.forEach(([kk,vv])=>box.append(node(kk,vv,depth+1)));
+  return h('div', head, box);
+}
+function flat(o, p='', out={}){
+  if(o && typeof o==='object'){ Object.entries(o).forEach(([k,v])=>flat(v, p?p+'.'+k:k, out)); }
+  else out[p]=o;
+  return out;
+}
+function schema(v){
+  if(Array.isArray(v)) return [v.length? schema(v[0]) : 'any'];
+  if(v && typeof v==='object') return Object.fromEntries(Object.entries(v).map(([k,x])=>[k,schema(x)]));
+  return v===null?'null':typeof v;
+}
+function render(){
+  const [a,ea] = parse('#a');
+  $('#stat').textContent = ea ? 'invalid JSON' : fmt.kb($('#a').value.length)+' · '+Object.keys(flat(a)).length+' leaves';
+  $('#stat').className = 'tag '+(ea?'bad':'ok');
+  $('#bpane').style.display = mode==='Diff' ? '' : 'none';
+  $('#rh').textContent = mode;
+  if(ea) return fill($('#right'), h('div.empty', ea));
+  if(mode==='Tree') fill($('#right'), h('div', Object.entries(a).map(([k,v])=>node(k,v,0))));
+  else if(mode==='Schema') fill($('#right'), h('pre', JSON.stringify(schema(a),null,2)));
+  else if(mode==='Diff'){
+    const [b,eb] = parse('#b');
+    if(eb) return fill($('#right'), h('div.empty','Document B: '+eb));
+    const fa = flat(a), fb = flat(b), keys = [...new Set([...Object.keys(fa),...Object.keys(fb)])].sort();
+    const rows = keys.filter(k=>JSON.stringify(fa[k])!==JSON.stringify(fb[k]));
+    fill($('#right'), rows.length? h('table',
+      h('thead',h('tr',h('th','Path'),h('th','A'),h('th','B'))),
+      h('tbody', rows.map(k=>h('tr',
+        h('td.mono.small',k),
+        h('td.mono.small',{style:{color:k in fa?'var(--bad)':'var(--fg3)'}}, k in fa? JSON.stringify(fa[k]):'—'),
+        h('td.mono.small',{style:{color:k in fb?'var(--ok)':'var(--fg3)'}}, k in fb? JSON.stringify(fb[k]):'—')))))
+      : h('div.empty','Documents are structurally identical'));
+    $('#stat').textContent = rows.length+' differing path'+(rows.length===1?'':'s');
+    $('#stat').className = 'tag '+(rows.length?'warn':'ok');
+  }
+}
+$('#q').oninput = () => {
+  const [a,e] = parse('#a'); if(e) return;
+  const path = $('#q').value.trim();
+  if(!path) return $('#qout').textContent = '';
+  try {
+    const v = path.replace(/\[(\d+)\]/g,'.$1').split('.').filter(Boolean)
+      .reduce((o,k)=> o==null?undefined:o[k], a);
+    $('#qout').textContent = v===undefined ? '(no value at that path)' : JSON.stringify(v,null,2);
+  } catch(err){ $('#qout').textContent = '(bad path)'; }
+};
+$('#fmt').onclick = () => { const [a,e]=parse('#a'); if(e) return toast(e);
+  $('#a').value = JSON.stringify(a,null,2); render(); };
+$('#min').onclick = () => { const [a,e]=parse('#a'); if(e) return toast(e);
+  const before = $('#a').value.length; $('#a').value = JSON.stringify(a);
+  toast('Saved '+fmt.kb(before-$('#a').value.length)); render(); };
+$('#load').onclick = () => { $('#a').value = JSON.stringify(SAMPLE,null,2);
+  $('#b').value = JSON.stringify(SAMPLE_B,null,2); render(); };
+$('#a').addEventListener('input', render); $('#b').addEventListener('input', render);
+fill($('#tabs'), tabs(['Tree','Schema','Diff'], m=>{ mode=m; render();
+  submit('jsonlab.mode',{mode:m}).catch(()=>{}); }));
+render();
+</script>

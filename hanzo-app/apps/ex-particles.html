@@ -1,0 +1,109 @@
+<!--hz {"title":"Particles","archetype":"WebGL / 3D","creator":"gfx","desc":"GPU particle field: 200k points integrated in a vertex shader against a curl-like flow, with additive blending, pointer attraction, colour ramps and live counters.","nav":[["#/","Field"]]} -->
+<div class="split r">
+  <div class="pane"><header>Field <span class="spacer"></span><span class="small muted" id="fps">—</span></header>
+    <canvas id="gl" style="width:100%;display:block;background:#04050a;aspect-ratio:16/9;cursor:crosshair"></canvas>
+    <div class="body"><p class="hz-note" style="margin:0">Move the pointer over the field to bend the flow. Every particle's position is computed in the vertex shader from its index and the clock — no positions are stored or uploaded per frame.</p></div></div>
+  <div class="pane"><header>Parameters</header><div class="body col" id="ui"></div></div>
+</div>
+<script>
+const {h,fill,$,store,fmt} = hz;
+const cv = $('#gl'), gl = cv.getContext('webgl2',{antialias:false,alpha:false});
+const P = store('particles', {count:5, speed:0.5, swirl:0.65, size:1.6, ramp:0, pull:0.6, trail:0.86});
+const COUNTS = [20000,50000,100000,150000,200000,300000];
+
+const VS = `#version 300 es
+precision highp float;
+uniform float T,SPD,SWIRL,SIZE,PULL; uniform vec2 M; uniform vec2 R;
+out float vLife; out float vSpd;
+float hash(float n){ return fract(sin(n)*43758.5453123); }
+vec2 flow(vec2 p, float t){
+  float a = sin(p.y*1.7 + t*0.6) + cos(p.x*1.3 - t*0.45);
+  float b = cos(p.x*1.9 - t*0.5) - sin(p.y*1.1 + t*0.33);
+  return vec2(a,b);
+}
+void main(){
+  float i = float(gl_VertexID);
+  float seed = hash(i*0.0137);
+  float life = fract(seed + T*0.07*SPD);
+  vec2 p = vec2(hash(i*0.911)*2.0-1.0, hash(i*0.573)*2.0-1.0);
+  float t = T*SPD;
+  for(int k=0;k<3;k++){
+    p += flow(p*1.6, t + float(k)*0.4) * 0.045 * SWIRL * (0.4+life);
+  }
+  vec2 d = M - p;
+  p += normalize(d + 1e-5) * PULL * 0.09 * exp(-dot(d,d)*2.2);
+  p = fract((p+1.0)*0.5)*2.0-1.0;
+  vLife = life; vSpd = length(flow(p*1.6,t))*0.25;
+  gl_Position = vec4(p.x*min(1.0,R.y/R.x*1.777), p.y, 0.0, 1.0);
+  gl_PointSize = SIZE * (0.6 + life);
+}`;
+const FS = `#version 300 es
+precision highp float;
+in float vLife; in float vSpd; uniform int RAMP; out vec4 O;
+vec3 ramp(float t){
+  if(RAMP==0) return mix(vec3(0.25,0.45,1.0), vec3(0.85,0.35,1.0), t);
+  if(RAMP==1) return mix(vec3(0.05,0.85,0.55), vec3(0.98,0.80,0.25), t);
+  if(RAMP==2) return mix(vec3(1.0,0.35,0.30), vec3(1.0,0.85,0.55), t);
+  return mix(vec3(0.55,0.60,0.70), vec3(1.0,1.0,1.0), t);
+}
+void main(){
+  vec2 c = gl_PointCoord*2.0-1.0;
+  float m = 1.0 - smoothstep(0.35,1.0,dot(c,c));
+  if(m<=0.01) discard;
+  O = vec4(ramp(clamp(vSpd+vLife*0.5,0.0,1.0)) * m, m*0.85);
+}`;
+function sh(t,s){const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);
+  if(!gl.getShaderParameter(o,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o));return o;}
+const prog=gl.createProgram();
+gl.attachShader(prog,sh(gl.VERTEX_SHADER,VS)); gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,FS));
+gl.linkProgram(prog); gl.useProgram(prog);
+if(!gl.getProgramParameter(prog,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+gl.bindVertexArray(gl.createVertexArray());
+gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+const U = n => gl.getUniformLocation(prog,n);
+
+let mouse=[0,0], t0=performance.now(), fr=0, tl=t0;
+cv.addEventListener('pointermove', e => { const r=cv.getBoundingClientRect();
+  mouse = [((e.clientX-r.left)/r.width)*2-1, 1-((e.clientY-r.top)/r.height)*2]; });
+cv.addEventListener('pointerleave', () => mouse=[0,0]);
+
+function slider(k,label,min,max,step){
+  return h('div.field',{style:{margin:0}}, h('label',label),
+    h('input',{type:'range',min,max,step,value:P.get()[k],
+      oninput:e=>{P.set(v=>({...v,[k]:+e.target.value})); ui();}}));
+}
+function ui(){
+  const p = P.get();
+  fill($('#ui'),
+    h('div.field',{style:{margin:0}},h('label','Particles · '+fmt.n(COUNTS[p.count])),
+      h('input',{type:'range',min:0,max:5,step:1,value:p.count,
+        oninput:e=>{P.set(v=>({...v,count:+e.target.value}));ui();}})),
+    slider('speed','Speed · '+p.speed.toFixed(2),0.05,1.6,0.01),
+    slider('swirl','Swirl · '+p.swirl.toFixed(2),0,1.6,0.01),
+    slider('size','Point size · '+p.size.toFixed(1),0.6,6,0.1),
+    slider('pull','Pointer pull · '+p.pull.toFixed(2),0,1.6,0.01),
+    slider('trail','Trail persistence · '+p.trail.toFixed(2),0,0.97,0.01),
+    h('div.field',{style:{margin:0}},h('label','Colour ramp'),
+      h('select',{onchange:e=>{P.set(v=>({...v,ramp:+e.target.value}));ui();}},
+        ['Blue → violet','Green → amber','Red → cream','Monochrome'].map((n,i)=>h('option',{value:i,selected:p.ramp===i},n)))),
+    h('button.g',{onclick:()=>{P.reset();ui();}},'Reset'),
+    h('div.small.muted',{style:{marginTop:'6px'}}, 'One draw call per frame · zero per-frame uploads'));
+}
+function resize(){ const dpr=Math.min(devicePixelRatio||1,1.6);
+  const w=Math.round(cv.clientWidth*dpr), hh=Math.round(cv.clientHeight*dpr);
+  if(cv.width!==w||cv.height!==hh){cv.width=w;cv.height=hh;gl.viewport(0,0,w,hh);} }
+function frame(now){
+  resize(); const p=P.get(), t=(now-t0)/1000;
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.clearColor(0.016,0.02,0.04, 1-p.trail); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+  gl.uniform1f(U('T'),t); gl.uniform1f(U('SPD'),p.speed); gl.uniform1f(U('SWIRL'),p.swirl);
+  gl.uniform1f(U('SIZE'),p.size); gl.uniform1f(U('PULL'),p.pull);
+  gl.uniform1i(U('RAMP'),p.ramp);
+  gl.uniform2f(U('M'),mouse[0],mouse[1]); gl.uniform2f(U('R'),cv.width,cv.height);
+  gl.drawArrays(gl.POINTS, 0, COUNTS[p.count]);
+  if(++fr>=30){ $('#fps').textContent = Math.round(fr*1000/(now-tl))+' fps · '+fmt.n(COUNTS[p.count])+' points'; fr=0; tl=now; }
+  requestAnimationFrame(frame);
+}
+ui(); if(gl) requestAnimationFrame(frame); else $('#fps').textContent='WebGL2 unavailable';
+</script>

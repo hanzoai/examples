@@ -1,0 +1,110 @@
+<!--hz {"title":"Sheets","archetype":"collaborative editor / spreadsheet","creator":"live","desc":"Spreadsheet with a real formula engine: cell references, ranges, SUM/AVG/MIN/MAX/COUNT/IF, dependency-aware recalculation, cycle detection, keyboard navigation and cross-tab sync.","nav":[["#/","Grid"]]} -->
+<div class="row" style="margin-bottom:10px">
+  <h1 style="margin:0">Sheets</h1><span class="tag acc" id="peers">1</span>
+  <span class="mono small" id="ref">A1</span>
+  <input id="fx" placeholder="Value or =SUM(B2:B9)" style="max-width:420px">
+  <span class="spacer"></span>
+  <button id="demo">Reset demo</button><button class="p" id="save">Save</button>
+</div>
+<div class="pane"><div class="scroll-x" style="max-height:66vh;overflow:auto"><table id="grid"></table></div></div>
+<p class="hz-note" style="margin-top:14px">Formulas are evaluated by a small engine in this page — references, ranges, six functions and cycle detection. Edits sync live to other tabs of this browser.</p>
+<script>
+const {h,fill,$,$$,store,fmt,toast,submit} = hz;
+const COLS = 8, ROWS = 22, A = i => String.fromCharCode(65+i);
+const DEMO = {
+  A1:'Region', B1:'Units', C1:'Price', D1:'Revenue',
+  A2:'North', B2:'120', C2:'18.50', D2:'=B2*C2',
+  A3:'South', B3:'84',  C3:'21.00', D3:'=B3*C3',
+  A4:'East',  B4:'156', C4:'17.25', D4:'=B4*C4',
+  A5:'West',  B5:'99',  C5:'24.00', D5:'=B5*C5',
+  A7:'Total', B7:'=SUM(B2:B5)', D7:'=SUM(D2:D5)',
+  A8:'Average', D8:'=AVG(D2:D5)',
+  A9:'Best', D9:'=MAX(D2:D5)',
+  A10:'Rows', B10:'=COUNT(B2:B5)',
+  A12:'Healthy?', B12:'=IF(D7>6000,1,0)',
+};
+const cells = store('sheets.cells', DEMO);
+let sel = 'A1';
+const bc = 'BroadcastChannel' in self ? new BroadcastChannel('hz-sheets') : null;
+const meId = Math.random().toString(36).slice(2);
+const peers = new Map();
+
+const num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+function expand(range, seen){
+  const [a,b] = range.split(':');
+  const c1 = a.charCodeAt(0)-65, r1 = +a.slice(1), c2 = b.charCodeAt(0)-65, r2 = +b.slice(1);
+  const out = [];
+  for(let c=Math.min(c1,c2);c<=Math.max(c1,c2);c++)
+    for(let r=Math.min(r1,r2);r<=Math.max(r1,r2);r++) out.push(num(value(A(c)+r, seen)));
+  return out;
+}
+function value(ref, seen){
+  const raw = cells.get()[ref];
+  if(raw == null || raw === '') return '';
+  if(String(raw)[0] !== '=') return raw;
+  if(seen.has(ref)) return '#CYCLE';
+  seen = new Set([...seen, ref]);
+  let e = String(raw).slice(1).toUpperCase();
+  try {
+    e = e.replace(/\b(SUM|AVG|MIN|MAX|COUNT)\(([A-H]\d+:[A-H]\d+)\)/g, (_,f,rg) => {
+      const xs = expand(rg, seen);
+      return f==='SUM'? xs.reduce((a,b)=>a+b,0) : f==='AVG'? (xs.reduce((a,b)=>a+b,0)/(xs.length||1))
+        : f==='MIN'? Math.min(...xs) : f==='MAX'? Math.max(...xs) : xs.filter(x=>x!==0).length;
+    });
+    e = e.replace(/\bIF\(([^,]+),([^,]+),([^)]+)\)/g, '(($1)?($2):($3))');
+    e = e.replace(/\b([A-H])(\d+)\b/g, (_,c,r)=> { const v = value(c+r, seen); return String(num(v)); });
+    if(!/^[-+*/%()<>=!?:.\s0-9]+$/.test(e)) return '#SYNTAX';
+    const out = Function('return ('+e.replace(/([^<>!])=([^=])/g,'$1==$2')+')')();
+    return typeof out === 'number' ? (Math.round(out*1e6)/1e6) : out;
+  } catch(err){ return '#ERR'; }
+}
+function render(){
+  const body = [h('tr', h('th',''), ...Array.from({length:COLS},(_,c)=>h('th',{style:{textAlign:'center'}},A(c))))];
+  for(let r=1;r<=ROWS;r++){
+    body.push(h('tr', h('th',{style:{textAlign:'right'}},r),
+      ...Array.from({length:COLS},(_,c)=>{
+        const ref = A(c)+r, v = value(ref, new Set());
+        const isNum = v!=='' && !isNaN(parseFloat(v)) && String(cells.get()[ref]||'')[0]!=='\'';
+        const others = [...peers.values()].filter(p=>p.sel===ref);
+        return h('td',{style:{padding:'0',minWidth:'92px',
+            outline: ref===sel?'2px solid var(--acc)':others.length?'2px solid '+others[0].color:'',
+            outlineOffset:'-2px', textAlign:isNum?'right':'left'},
+          onclick:()=>pick(ref)},
+          h('div',{style:{padding:'7px 9px',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',
+            fontVariantNumeric:'tabular-nums',
+            fontWeight: r===1?'650':'', color: String(v).startsWith('#')?'var(--bad)':''},
+            title: cells.get()[ref]||''},
+            typeof v==='number' ? fmt.n(v, v%1?2:0) : String(v)));
+      })));
+  }
+  fill($('#grid'), body);
+}
+function pick(ref){ sel = ref; $('#ref').textContent = ref; $('#fx').value = cells.get()[ref] ?? '';
+  render(); bc?.postMessage({from:meId, sel:ref, color:'#8b5cf6'}); }
+$('#fx').addEventListener('keydown', e => {
+  if(e.key==='Enter'){ set(sel, e.target.value);
+    const c = sel.charCodeAt(0)-65, r = +sel.slice(1);
+    pick(A(c) + Math.min(ROWS, r+1)); $('#fx').focus(); }
+});
+$('#fx').addEventListener('blur', () => set(sel, $('#fx').value));
+function set(ref, v){ cells.set(o=>({...o,[ref]:v})); render(); bc?.postMessage({from:meId, ref, v}); }
+addEventListener('keydown', e => {
+  if(document.activeElement === $('#fx')) return;
+  const c = sel.charCodeAt(0)-65, r = +sel.slice(1);
+  const map = {ArrowRight:[1,0],ArrowLeft:[-1,0],ArrowDown:[0,1],ArrowUp:[0,-1],Tab:[1,0]};
+  if(map[e.key]){ e.preventDefault();
+    pick(A(Math.max(0,Math.min(COLS-1,c+map[e.key][0]))) + Math.max(1,Math.min(ROWS,r+map[e.key][1]))); }
+  else if(e.key==='Delete'||e.key==='Backspace'){ e.preventDefault(); set(sel,''); }
+  else if(e.key.length===1){ $('#fx').value = e.key; $('#fx').focus(); }
+});
+if(bc) bc.onmessage = e => { const d=e.data; if(d.from===meId) return;
+  if(d.ref!==undefined){ cells.set(o=>({...o,[d.ref]:d.v})); }
+  if(d.sel) peers.set(d.from,{sel:d.sel,color:d.color,at:Date.now()});
+  $('#peers').textContent = peers.size+1; render(); };
+$('#demo').onclick = () => { cells.set({...DEMO}); render(); toast('Demo data restored'); };
+$('#save').onclick = async () => { try{ await submit('sheets.save',{cells:cells.get()}); toast('Sheet saved to @hanzo/base'); }
+  catch(e){ toast('Save failed — kept locally'); } };
+setInterval(()=>{ [...peers].forEach(([k,p])=>{ if(Date.now()-p.at>6000) peers.delete(k); });
+  $('#peers').textContent = peers.size+1; }, 3000);
+pick('A1'); render();
+</script>

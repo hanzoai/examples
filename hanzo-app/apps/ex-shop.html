@@ -1,0 +1,110 @@
+<!--hz {"title":"Kindling","archetype":"ecommerce storefront","creator":"web","desc":"Storefront with faceted catalogue, product detail, variant picker, persistent cart and a checkout form that posts the order to @hanzo/base.","nav":[["#/","Shop"],["#/cart","Cart"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Kindling</h1>
+  <span class="small muted">Everyday goods · free returns</span>
+  <span class="spacer"></span>
+  <a class="btn" href="#/cart" id="cartBtn">Cart</a>
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:18px">A demonstration storefront. Products, prices and stock are invented; no order is fulfilled and no payment is taken.</p>
+<script>
+const {h,fill,$,store,rng,range,pick,fmt,modal,toast,submit,route,wire} = hz;
+const r = rng(555);
+const CATS = ['Kitchen','Desk','Outdoor','Textiles'];
+const P = [
+ ['Cast iron skillet','Kitchen',62,['10 inch','12 inch']],['Enamel kettle','Kitchen',48,['1.2 L','1.7 L']],
+ ['Olive wood board','Kitchen',34,['Small','Large']],['Stoneware mug','Kitchen',18,['Ash','Clay','Slate']],
+ ['Linen apron','Kitchen',42,['One size']],['Brass desk lamp','Desk',96,['Brass','Black']],
+ ['Cork deskmat','Desk',38,['60×30','80×40']],['Notebook, dotted','Desk',14,['A5','B5']],
+ ['Pen, machined','Desk',52,['Steel','Titanium']],['Cable tray','Desk',24,['Small','Wide']],
+ ['Canvas tote','Outdoor',36,['Natural','Charcoal']],['Enamel bottle','Outdoor',28,['500 ml','750 ml']],
+ ['Wool blanket','Outdoor',118,['Grey','Rust']],['Folding stool','Outdoor',74,['Ash','Walnut']],
+ ['Waffle towel','Textiles',26,['Hand','Bath']],['Linen sheet set','Textiles',158,['Double','King']],
+ ['Cushion cover','Textiles',32,['Flax','Indigo','Moss']],['Table runner','Textiles',44,['Natural','Olive']],
+].map(([n,c,pr,v],i)=>({id:'k'+i,n,c,pr,v,stock:Math.round(r()*40),
+  hue:[24,196,140,318,262][i%5], rating:(3.6+r()*1.3).toFixed(1)}));
+const cart = store('kindling.cart', []);
+const view = $('#view');
+let cat='All', sort='featured';
+
+const tile = p => h('div',{style:{aspectRatio:'4/3',borderRadius:'8px',
+  background:`linear-gradient(135deg,hsl(${p.hue} 46% 34%),hsl(${(p.hue+40)%360} 42% 22%))`,
+  display:'grid',placeItems:'center',color:'#fff',fontWeight:700,letterSpacing:'.04em',fontSize:'13px'}}, p.c.toUpperCase());
+const count = () => cart.get().reduce((a,x)=>a+x.q,0);
+function badge(){ $('#cartBtn').textContent = 'Cart' + (count()?' · '+count():''); }
+
+function shop(){
+  let list = P.filter(p=>cat==='All'||p.c===cat);
+  if(sort==='low') list=[...list].sort((a,b)=>a.pr-b.pr);
+  if(sort==='high') list=[...list].sort((a,b)=>b.pr-a.pr);
+  fill(view,
+    h('div.row',{style:{marginBottom:'14px'}},
+      h('div.row',{style:{gap:'4px'}},['All',...CATS].map(c=>
+        h('button.sm'+(c===cat?' p':''),{onclick:()=>{cat=c;shop();}},c))),
+      h('span.spacer'),
+      h('select',{style:{maxWidth:'170px'},onchange:e=>{sort=e.target.value;shop();}},
+        [['featured','Featured'],['low','Price: low to high'],['high','Price: high to low']]
+          .map(([v,t])=>h('option',{value:v,selected:v===sort},t)))),
+    h('div.grid.wide', list.map(p =>
+      h('div.card',{style:{cursor:'pointer'},onclick:()=>detail(p)},
+        tile(p),
+        h('div.row',{style:{marginTop:'10px',gap:'6px'}}, h('span.b',p.n), h('span.spacer'), h('span.b.num',fmt.money(p.pr))),
+        h('div.row',{style:{gap:'6px',marginTop:'4px'}},
+          h('span.small.muted','★ '+p.rating),
+          h('span.tag'+(p.stock>8?' ok':p.stock?' warn':' bad'), p.stock>8?'in stock':p.stock?'low stock':'backorder'))))));
+}
+function detail(p){
+  const v = h('select', p.v.map(x=>h('option',x)));
+  const q = h('input',{type:'number',value:1,min:1,max:9});
+  modal(p.n, h('div',
+    tile(p),
+    h('div.row',{style:{margin:'12px 0',gap:'8px'}},
+      h('span.b.num',{style:{fontSize:'20px'}},fmt.money(p.pr)),
+      h('span.tag',p.c), h('span.small.muted','★ '+p.rating), h('span.spacer'),
+      h('span.tag'+(p.stock?' ok':' bad'), p.stock+' available')),
+    h('p.small','Part of the demonstration catalogue. The description, materials and dimensions that a real product page would carry are intentionally omitted rather than invented.'),
+    h('div.row',h('div.field',{style:{flex:1}},h('label','Variant'),v),
+      h('div.field',{style:{width:'90px'}},h('label','Qty'),q))),
+    () => { cart.set(c=>{
+        const k = p.id+'/'+v.value, at = c.find(x=>x.k===k);
+        return at ? c.map(x=>x.k===k?{...x,q:x.q+ +q.value}:x) : [...c,{k,id:p.id,n:p.n,v:v.value,pr:p.pr,q:+q.value,hue:p.hue}];
+      }); badge(); toast('Added to cart'); }, 'Add to cart');
+}
+function cartView(){
+  const c = cart.get(), sub = c.reduce((a,x)=>a+x.pr*x.q,0), ship = sub>120||!sub?0:9, tax = +(sub*0.0875).toFixed(2);
+  fill(view, h('div.split.r',
+    h('div.pane',h('header','Your cart'),
+      c.length ? h('ul.list', c.map(x=>h('li',
+        h('div',{style:{width:'44px',height:'44px',borderRadius:'7px',flex:'none',
+          background:`linear-gradient(135deg,hsl(${x.hue} 46% 34%),hsl(${(x.hue+40)%360} 42% 22%))`}}),
+        h('div',{style:{minWidth:0}},h('div.b',x.n),h('div.small.muted',x.v)),
+        h('span.spacer'),
+        h('div.row',{style:{gap:'4px'}},
+          h('button.sm',{onclick:()=>{cart.set(v=>v.map(y=>y.k===x.k?{...y,q:Math.max(1,y.q-1)}:y));cartView();badge();}},'−'),
+          h('span.num',x.q),
+          h('button.sm',{onclick:()=>{cart.set(v=>v.map(y=>y.k===x.k?{...y,q:y.q+1}:y));cartView();badge();}},'+')),
+        h('span.b.num',{style:{width:'80px',textAlign:'right'}},fmt.money(x.pr*x.q)),
+        h('button.g.sm',{onclick:()=>{cart.set(v=>v.filter(y=>y.k!==x.k));cartView();badge();}},'✕'))))
+        : h('div.empty','Your cart is empty. '+ '' , h('a',{href:'#/'},'Browse the catalogue'))),
+    h('div.col',
+      h('div.pane',h('header','Summary'),h('div.body',
+        row('Subtotal',fmt.money(sub)), row('Shipping', ship?fmt.money(ship):'Free'),
+        row('Estimated tax',fmt.money(tax)), h('hr'),
+        row('Total', fmt.money(sub+ship+tax), true))),
+      h('div.pane',h('header','Checkout'),h('div.body', form(sub+ship+tax))))));
+}
+const row = (k,v,b) => h('div.row',{style:{justifyContent:'space-between',marginBottom:'6px'}},
+  h('span'+(b?'.b':'.small.muted'),k), h('span.num'+(b?'.b':''),v));
+function form(total){
+  const f = h('form',
+    h('div.field',h('label','Email'),h('input',{name:'email',type:'email',required:true,placeholder:'you@example.invalid'})),
+    h('div.field',h('label','Ship to'),h('input',{name:'address',required:true,placeholder:'Street, city, postcode'})),
+    h('div.row',h('div.field',{style:{flex:1}},h('label','Country'),
+      h('select',{name:'country'},['United States','Canada','Netherlands','Japan'].map(c=>h('option',c)))),
+      h('div.field',{style:{width:'110px'}},h('label','Postcode'),h('input',{name:'zip',required:true}))),
+    h('button.p',{type:'submit',style:{width:'100%'}},'Place order · '+fmt.money(total)),
+    h('p.hz-note',{style:{marginTop:'8px'}},'No payment method is collected and no charge is made. The order record is written to @hanzo/base.'));
+  return wire(f,'kindling.order',()=>{ cart.set([]); badge(); toast('Order recorded'); cartView(); });
+}
+route({'':shop,'cart':cartView,'*':shop}); badge();
+</script>

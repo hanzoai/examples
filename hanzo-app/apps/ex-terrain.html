@@ -1,0 +1,143 @@
+<!--hz {"title":"Terrain","archetype":"WebGL / 3D","creator":"gfx","desc":"WebGL2 procedural terrain: a value-noise heightfield meshed on the GPU with fly-through camera, adjustable octaves, erosion-style ridging, water level, fog and wireframe.","nav":[["#/","Scene"]]} -->
+<div class="split r">
+  <div class="pane"><header>Terrain <span class="spacer"></span><span class="small muted" id="fps">—</span></header>
+    <canvas id="gl" style="width:100%;display:block;background:#05070c;aspect-ratio:16/9"></canvas>
+    <div class="body"><p class="hz-note" style="margin:0">Drag to look, scroll to change altitude. The heightfield is evaluated in the vertex shader from a hash-based value noise, so the whole world is source code — nothing is downloaded.</p></div></div>
+  <div class="pane"><header>Controls</header><div class="body col" id="ui"></div></div>
+</div>
+<script>
+const {h,fill,$,store} = hz;
+const cv = $('#gl'), gl = cv.getContext('webgl2',{antialias:true});
+const P = store('terrain', {oct:5, amp:0.62, ridge:0.45, water:0.28, fog:0.5, wire:0, speed:0.35});
+
+const VS = `#version 300 es
+precision highp float;
+uniform mat4 MVP; uniform float T,AMP,RIDGE,SPD; uniform int OCT;
+uniform vec2 GRID;
+out float vH; out vec3 vP;
+float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
+float vnoise(vec2 p){
+  vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f);
+  return mix(mix(hash(i),hash(i+vec2(1,0)),f.x), mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x), f.y);
+}
+float fbm(vec2 p){
+  float a=0.5, s=0.0, n=0.0;
+  for(int i=0;i<8;i++){
+    if(i>=OCT) break;
+    float v=vnoise(p);
+    v = mix(v, 1.0-abs(v*2.0-1.0), RIDGE);
+    s += a*v; n += a; a*=0.5; p*=2.02; p+=vec2(1.7,9.2);
+  }
+  return s/max(n,0.001);
+}
+void main(){
+  float ix = float(gl_VertexID % int(GRID.x));
+  float iz = float(gl_VertexID / int(GRID.x));
+  vec2 uv = vec2(ix/GRID.x, iz/GRID.y);
+  vec3 p = vec3((uv.x-0.5)*36.0, 0.0, (uv.y)*44.0 - T*SPD*6.0);
+  float hgt = fbm(vec2(p.x,p.z)*0.055)*AMP*7.0;
+  p.y = hgt;
+  vH = hgt; vP = p;
+  gl_Position = MVP * vec4(p,1.0);
+}`;
+const FS = `#version 300 es
+precision highp float;
+in float vH; in vec3 vP; uniform float WATER,FOG,AMP; out vec4 O;
+void main(){
+  float w = WATER*AMP*7.0;
+  vec3 rock = vec3(0.32,0.30,0.34), grass=vec3(0.16,0.34,0.20), snow=vec3(0.92,0.94,0.98), sand=vec3(0.55,0.48,0.34);
+  float t = clamp((vH - w)/ (AMP*7.0), 0.0, 1.0);
+  vec3 c = mix(sand, grass, smoothstep(0.02,0.22,t));
+  c = mix(c, rock, smoothstep(0.30,0.62,t));
+  c = mix(c, snow, smoothstep(0.66,0.85,t));
+  if(vH < w) c = mix(vec3(0.05,0.16,0.30), vec3(0.08,0.28,0.42), clamp((vH-w)*0.6+1.0,0.0,1.0));
+  float shade = 0.55 + 0.45*clamp(vH/(AMP*7.0),0.0,1.0);
+  float d = length(vP.xz)*0.016*FOG*2.0;
+  c = mix(c*shade, vec3(0.05,0.06,0.10), clamp(d,0.0,0.92));
+  O = vec4(c,1.0);
+}`;
+function sh(t,s){const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);
+  if(!gl.getShaderParameter(o,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o;}
+const prog=gl.createProgram();
+gl.attachShader(prog,sh(gl.VERTEX_SHADER,VS)); gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,FS));
+gl.linkProgram(prog); gl.useProgram(prog);
+if(!gl.getProgramParameter(prog,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+const U = n => gl.getUniformLocation(prog,n);
+gl.enable(gl.DEPTH_TEST);
+
+// Index buffer for a GRID.x by GRID.y triangle strip mesh, built once.
+const GX=190, GZ=190, idx=[];
+for(let z=0;z<GZ-1;z++) for(let x=0;x<GX-1;x++){
+  const a=z*GX+x, b=a+1, c=a+GX, d=c+1;
+  idx.push(a,c,b, b,c,d);
+}
+const ib = gl.createBuffer();
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(idx), gl.STATIC_DRAW);
+gl.bindVertexArray(gl.createVertexArray());
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+
+let yaw=0, pitch=-0.20, alt=5.4, drag=null, t0=performance.now(), fr=0, tl=t0;
+cv.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId);});
+addEventListener('pointerup',()=>drag=null);
+cv.addEventListener('pointermove',e=>{ if(!drag)return;
+  yaw-=(e.clientX-drag[0])*0.004; pitch=Math.max(-0.9,Math.min(0.35,pitch-(e.clientY-drag[1])*0.003));
+  drag=[e.clientX,e.clientY]; });
+cv.addEventListener('wheel',e=>{e.preventDefault(); alt=Math.max(1.5,Math.min(22,alt+e.deltaY*0.006));},{passive:false});
+
+// Column-major perspective × lookAt — the layout gl.uniformMatrix4fv expects.
+function mat(fov,asp,near,far,eye,yaw,pitch){
+  const f=1/Math.tan(fov/2), nf=1/(near-far);
+  const P=[f/asp,0,0,0, 0,f,0,0, 0,0,(far+near)*nf,-1, 0,0,2*far*near*nf,0];
+  const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+  const dir=[sy*cp, sp, cy*cp];               // where the camera looks
+  const at=[eye[0]+dir[0],eye[1]+dir[1],eye[2]+dir[2]];
+  const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+  const nrm=v=>{const l=Math.hypot(...v)||1;return[v[0]/l,v[1]/l,v[2]/l];};
+  const crs=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+  const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+  const z=nrm(sub(eye,at)), x=nrm(crs([0,1,0],z)), y=crs(z,x);
+  const V=[x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0,
+           -dot(x,eye),-dot(y,eye),-dot(z,eye),1];
+  const o=new Float32Array(16);
+  for(let c=0;c<4;c++)for(let r0=0;r0<4;r0++){let s=0;
+    for(let k=0;k<4;k++) s+=P[k*4+r0]*V[c*4+k]; o[c*4+r0]=s;}
+  return o;
+}
+function slider(k,label,min,max,step){
+  return h('div.field',{style:{margin:0}}, h('label',label),
+    h('input',{type:'range',min,max,step,value:P.get()[k],oninput:e=>{P.set(v=>({...v,[k]:+e.target.value}));ui();}}));
+}
+function ui(){
+  const p=P.get();
+  fill($('#ui'),
+    h('div.field',{style:{margin:0}},h('label','Octaves · '+p.oct),
+      h('input',{type:'range',min:1,max:8,step:1,value:p.oct,oninput:e=>{P.set(v=>({...v,oct:+e.target.value}));ui();}})),
+    slider('amp','Amplitude · '+p.amp.toFixed(2),0.15,1.2,0.01),
+    slider('ridge','Ridging · '+p.ridge.toFixed(2),0,1,0.01),
+    slider('water','Water level · '+p.water.toFixed(2),0,0.7,0.01),
+    slider('fog','Fog · '+p.fog.toFixed(2),0,1.4,0.01),
+    slider('speed','Fly speed · '+p.speed.toFixed(2),0,1.2,0.01),
+    h('label.inline',{style:{gap:'8px'}},
+      h('input',{type:'checkbox',checked:!!p.wire,onchange:e=>{P.set(v=>({...v,wire:e.target.checked?1:0}));ui();}}),
+      h('span','Wireframe')),
+    h('button.g',{onclick:()=>{P.reset();ui();}},'Reset'),
+    h('div.small.muted',{style:{marginTop:'6px'}}, (GX*GZ).toLocaleString()+' vertices · '+(idx.length/3).toLocaleString()+' triangles'));
+}
+function resize(){ const dpr=Math.min(devicePixelRatio||1,1.75);
+  const w=Math.round(cv.clientWidth*dpr), hh=Math.round(cv.clientHeight*dpr);
+  if(cv.width!==w||cv.height!==hh){cv.width=w;cv.height=hh;gl.viewport(0,0,w,hh);} }
+function frame(now){
+  resize(); const p=P.get(), t=(now-t0)/1000;
+  gl.clearColor(0.03,0.04,0.07,1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+  gl.uniformMatrix4fv(U('MVP'),false, mat(1.02, cv.width/cv.height, 0.1, 160, [0,alt,-6], yaw, pitch));
+  gl.uniform1f(U('T'),t); gl.uniform1f(U('AMP'),p.amp); gl.uniform1f(U('RIDGE'),p.ridge);
+  gl.uniform1f(U('SPD'),p.speed); gl.uniform1i(U('OCT'),p.oct);
+  gl.uniform1f(U('WATER'),p.water); gl.uniform1f(U('FOG'),p.fog);
+  gl.uniform2f(U('GRID'),GX,GZ);
+  gl.drawElements(p.wire?gl.LINES:gl.TRIANGLES, idx.length, gl.UNSIGNED_INT, 0);
+  if(++fr>=30){ $('#fps').textContent=Math.round(fr*1000/(now-tl))+' fps · '+cv.width+'×'+cv.height; fr=0; tl=now; }
+  requestAnimationFrame(frame);
+}
+ui(); if(gl) requestAnimationFrame(frame); else $('#fps').textContent='WebGL2 unavailable';
+</script>

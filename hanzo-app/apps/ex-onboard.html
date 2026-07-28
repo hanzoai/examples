@@ -1,0 +1,160 @@
+<!--hz {"title":"Onboard","archetype":"auth / onboarding flow","creator":"apps","desc":"Complete account flow: sign up with live password-strength scoring, email verification code, a two-factor step with a real TOTP-style code check, workspace setup wizard and an invite step — every step written to @hanzo/base.","nav":[["#/","Start"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Onboard</h1>
+  <span class="spacer"></span>
+  <span id="steps" class="row" style="gap:6px"></span>
+  <button class="g" id="restart">Restart</button>
+</div>
+<div style="max-width:560px;margin:0 auto"><div id="view"></div></div>
+<p class="hz-note" style="margin-top:18px;text-align:center">No real account is created and no password is stored anywhere — the strength meter and the verification checks run entirely in this page. Only the fact that a step completed is recorded in @hanzo/base.</p>
+<script>
+const {h,fill,$,store,uid,fmt,toast,submit,route} = hz;
+const STEPS = [['','Account'],['verify','Verify'],['mfa','Two-factor'],['workspace','Workspace'],['invite','Invite'],['done','Done']];
+const state = store('onboard', {email:'', name:'', code:null, mfa:null, workspace:'', region:'sfo3', invites:[]});
+const view = $('#view');
+
+function stepbar(){
+  const at = location.hash.replace(/^#\/?/,'');
+  const i = Math.max(0, STEPS.findIndex(([k])=>k===at));
+  fill($('#steps'), STEPS.map(([k,l],n)=>h('span.tag'+(n===i?' acc':n<i?' ok':''),
+    {style:{cursor:n<=i?'pointer':'default'},onclick:()=>{ if(n<=i) location.hash='#/'+k; }},
+    (n<i?'✓ ':'')+l)));
+}
+// Password strength: length, class variety, and a penalty for the obvious ones.
+function strength(p){
+  const classes = [/[a-z]/,/[A-Z]/,/\d/,/[^\w]/].filter(re=>re.test(p)).length;
+  let s = Math.min(4, Math.floor(p.length/4)) + classes - 1;
+  if(/^(password|qwerty|letmein|12345)/i.test(p)) s = 0;
+  if(p.length < 8) s = Math.min(s, 1);
+  return Math.max(0, Math.min(4, s));
+}
+function account(){
+  const email = h('input',{type:'email',required:true,placeholder:'you@example.invalid',value:state.get().email});
+  const name = h('input',{required:true,placeholder:'Your name',value:state.get().name});
+  const pw = h('input',{type:'password',required:true,placeholder:'At least 12 characters'});
+  const bar = h('div.bar',h('i',{style:{width:'0%'}}));
+  const label = h('div.small.muted','Type a password');
+  pw.oninput = () => { const s = strength(pw.value);
+    bar.firstChild.style.width = (s/4*100)+'%';
+    bar.firstChild.style.background = ['var(--bad)','var(--bad)','var(--warn)','var(--acc)','var(--ok)'][s];
+    label.textContent = ['Too weak','Weak','Fair','Good','Strong'][s] +
+      ' · ' + pw.value.length + ' characters, ' +
+      [/[a-z]/,/[A-Z]/,/\d/,/[^\w]/].filter(re=>re.test(pw.value)).length + ' of 4 character classes'; };
+  const f = h('form',
+    h('h2','Create your account'),
+    h('p.small.muted','Step 1 of 5. Nothing here reaches a real identity system.'),
+    h('div.field',h('label','Name'),name),
+    h('div.field',h('label','Email'),email),
+    h('div.field',h('label','Password'),pw, h('div',{style:{marginTop:'6px'}},bar), label),
+    h('button.p',{type:'submit',style:{width:'100%'}},'Continue'));
+  f.onsubmit = async e => { e.preventDefault();
+    if(!f.reportValidity()) return;
+    if(strength(pw.value) < 2) return toast('Choose a stronger password');
+    const code = String(100000+Math.floor(Math.random()*899999));
+    state.set(v=>({...v, email:email.value, name:name.value, code}));
+    try{ await submit('onboard.signup',{email:email.value}); }catch(err){}
+    location.hash = '#/verify';
+  };
+  fill(view, h('div.pane',h('div.body',f)));
+}
+function verify(){
+  const s = state.get();
+  const inputs = Array.from({length:6},()=>h('input',{maxLength:1,inputMode:'numeric',
+    style:{width:'44px',textAlign:'center',fontSize:'20px',fontFamily:'var(--mono)'}}));
+  inputs.forEach((el,i)=>el.addEventListener('input',()=>{
+    if(el.value && inputs[i+1]) inputs[i+1].focus();
+    const code = inputs.map(x=>x.value).join('');
+    if(code.length===6){
+      if(code===s.code){ toast('Email verified'); submit('onboard.verified',{}).catch(()=>{}); location.hash='#/mfa'; }
+      else { toast('That code is not right'); inputs.forEach(x=>x.value=''); inputs[0].focus(); }
+    }
+  }));
+  fill(view, h('div.pane',h('div.body',
+    h('h2','Check your email'),
+    h('p.small.muted','Step 2 of 5. A six-digit code was generated for '+(s.email||'your address')+'.'),
+    h('div.card.tight',{style:{marginBottom:'14px',borderColor:'var(--acc)'}},
+      h('div.small.muted','Because no email is sent, the code is shown here:'),
+      h('div',{style:{fontFamily:'var(--mono)',fontSize:'26px',letterSpacing:'.3em',marginTop:'4px'}}, s.code||'——————')),
+    h('div.row',{style:{gap:'8px',justifyContent:'center'}}, inputs),
+    h('button.g',{style:{width:'100%',marginTop:'14px'},
+      onclick:()=>{ state.set(v=>({...v, code:String(100000+Math.floor(Math.random()*899999))})); verify(); toast('New code generated'); }},
+      'Send a new code'))));
+  inputs[0].focus();
+}
+function mfa(){
+  const secret = (state.get().mfa || Array.from({length:16},()=>'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[Math.floor(Math.random()*32)]).join(''));
+  if(!state.get().mfa) state.set(v=>({...v, mfa:secret}));
+  // A visible time-stepped code, derived from the secret and the 30-second window.
+  const codeFor = () => { const win = Math.floor(Date.now()/30000);
+    let a = 2166136261; for(const c of secret+':'+win){ a^=c.charCodeAt(0); a=Math.imul(a,16777619); }
+    return String((a>>>0)%1000000).padStart(6,'0'); };
+  const shown = h('div',{style:{fontFamily:'var(--mono)',fontSize:'26px',letterSpacing:'.25em'}});
+  const ring = h('div.bar',h('i',{style:{width:'0%'}}));
+  const inp = h('input',{maxLength:6,placeholder:'000000',style:{fontFamily:'var(--mono)',fontSize:'18px',letterSpacing:'.2em',textAlign:'center'}});
+  const tick = () => { shown.textContent = codeFor();
+    ring.firstChild.style.width = ((30 - (Date.now()/1000)%30)/30*100)+'%';
+    if(document.body.contains(shown)) requestAnimationFrame(tick); };
+  fill(view, h('div.pane',h('div.body',
+    h('h2','Add a second factor'),
+    h('p.small.muted','Step 3 of 5. In a real flow you would scan this secret into an authenticator app.'),
+    h('div.card.tight',{style:{marginBottom:'12px'}},
+      h('div.small.muted','Shared secret'),
+      h('div.mono',{style:{wordBreak:'break-all',margin:'4px 0 10px'}}, secret),
+      h('div.small.muted','Current code (rotates every 30 seconds)'), shown, ring),
+    h('div.field',h('label','Enter the code to confirm'),inp),
+    h('button.p',{style:{width:'100%'},onclick:()=>{
+      if(inp.value.trim()===codeFor()){ toast('Two-factor enabled');
+        submit('onboard.mfa',{enabled:true}).catch(()=>{}); location.hash='#/workspace'; }
+      else toast('That code does not match the current window');
+    }},'Confirm'),
+    h('button.g',{style:{width:'100%',marginTop:'6px'},onclick:()=>{location.hash='#/workspace';}},'Skip for now'))));
+  tick();
+}
+function workspace(){
+  const name = h('input',{required:true,placeholder:'Acme Robotics',value:state.get().workspace});
+  const slug = h('div.small.muted');
+  name.oninput = () => slug.textContent = 'Your sites will be published at ' +
+    (name.value.trim().toLowerCase().replace(/\W+/g,'-')||'workspace') + '-*.hanzo.app';
+  name.oninput();
+  const region = h('select',['sfo3','nyc1','ams3','sgp1'].map(r=>h('option',{selected:r===state.get().region},r)));
+  fill(view, h('div.pane',h('div.body',
+    h('h2','Name your workspace'),
+    h('p.small.muted','Step 4 of 5.'),
+    h('div.field',h('label','Workspace name'),name, h('div',{style:{marginTop:'5px'}},slug)),
+    h('div.field',h('label','Primary region'),region),
+    h('button.p',{style:{width:'100%'},onclick:async()=>{
+      if(!name.value.trim()) return toast('A name is required');
+      state.set(v=>({...v, workspace:name.value.trim(), region:region.value}));
+      try{ await submit('onboard.workspace',{name:name.value.trim(), region:region.value}); }catch(e){}
+      location.hash='#/invite'; }},'Continue'))));
+}
+function invite(){
+  const box = h('textarea',{placeholder:'one@example.invalid, two@example.invalid',style:{minHeight:'90px'}});
+  fill(view, h('div.pane',h('div.body',
+    h('h2','Invite your team'),
+    h('p.small.muted','Step 5 of 5. Optional — you can do this later.'),
+    h('div.field',h('label','Email addresses, comma separated'),box),
+    h('button.p',{style:{width:'100%'},onclick:async()=>{
+      const list = box.value.split(',').map(s=>s.trim()).filter(Boolean);
+      state.set(v=>({...v, invites:list}));
+      if(list.length) try{ await submit('onboard.invites',{count:list.length}); }catch(e){}
+      location.hash='#/done'; }},'Finish setup'),
+    h('button.g',{style:{width:'100%',marginTop:'6px'},onclick:()=>{location.hash='#/done';}},'Skip'))));
+}
+function done(){
+  const s = state.get();
+  fill(view, h('div.pane',h('div.body',{style:{textAlign:'center',padding:'34px 20px'}},
+    h('div',{style:{fontSize:'44px',lineHeight:1}},'✓'),
+    h('h2','You are set up'),
+    h('p.small.muted','Nothing was actually created. This is an official Hanzo example of a complete onboarding flow.'),
+    h('table',{style:{marginTop:'14px',textAlign:'left'}},h('tbody',
+      [['Name',s.name||'—'],['Email',s.email||'—'],
+       ['Two-factor', s.mfa? 'enabled':'skipped'],
+       ['Workspace', s.workspace||'—'],['Region',s.region],
+       ['Invites sent', s.invites.length]].map(([k,v])=>h('tr',h('td.small.muted',k),h('td.b',String(v)))))))));
+}
+$('#restart').onclick = () => { state.reset(); location.hash='#/'; account(); toast('Flow reset'); };
+addEventListener('hashchange', stepbar);
+route({'':account,'verify':verify,'mfa':mfa,'workspace':workspace,'invite':invite,'done':done,'*':account});
+stepbar();
+</script>

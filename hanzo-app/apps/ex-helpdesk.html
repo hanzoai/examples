@@ -1,0 +1,101 @@
+<!--hz {"title":"Deskline","archetype":"helpdesk / ticketing","creator":"apps","desc":"Support desk: ticket queue with priority and SLA countdown, conversation thread, canned replies and per-agent load.","nav":[["#/","Queue"],["#/agents","Agents"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Deskline</h1>
+  <span id="pills" class="row" style="gap:6px"></span>
+  <span class="spacer"></span><button class="p" id="new">+ Ticket</button>
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:16px">Requesters, ticket bodies and SLA clocks are synthetic. Replies you send are stored in this browser and posted to @hanzo/base.</p>
+<script>
+const {h,fill,$,$$,store,rng,range,pick,uid,fmt,avatar,grid,bars,modal,toast,submit,route} = hz;
+const r = rng(7788);
+const PRI = {urgent:['bad',2],high:['warn',8],normal:['',24],low:['ok',72]};
+const AGENTS = ['Ada L','Grace H','Ken T','Barbara L'];
+const SUBJ = ['Custom domain stuck on pending','Deploy returns 413','Cannot invite a teammate','Billing receipt missing VAT id',
+ 'Rollback restored the wrong release','Analytics beacon blocked by CSP','SSO metadata rejected','Rate limited on bulk import',
+ 'Wildcard cert not covering apex','Webhook retries never stop','CSV export truncates unicode','Base record create returns 403'];
+const BODY = ['We pointed the CNAME two hours ago and the dashboard still says pending.',
+ 'Uploading a 6 MB archive fails immediately; a 3 MB one works.',
+ 'The invite email arrives but the accept link says the workspace is full.',
+ 'Our finance team needs the VAT identifier on the PDF receipt.'];
+const seed = range(16, i => ({
+  id: 'TCK-'+(1420+i), subj: SUBJ[i%SUBJ.length], who: pick(r,['R. Okafor','M. Silva','J. Park','T. Nguyen','L. Meyer']),
+  pri: pick(r,Object.keys(PRI)), agent: pick(r,AGENTS), state: r()<0.25?'solved':r()<0.5?'pending':'open',
+  opened: Date.now() - Math.round(r()*70)*36e5,
+  thread: [{who:'them', t: pick(r,BODY), at: Date.now()-Math.round(r()*70)*36e5}],
+}));
+const db = store('deskline', seed);
+const view = $('#view');
+const due = t => t.opened + PRI[t.pri][1]*36e5;
+const left = t => { const ms = due(t)-Date.now();
+  return ms<0 ? {s:'breached', c:'bad'} : {s:Math.floor(ms/36e5)+'h '+Math.floor(ms/6e4%60)+'m', c: ms<36e5?'warn':'ok'}; };
+let filter = 'all';
+
+function pills(){
+  const d = db.get();
+  fill($('#pills'), ['all','open','pending','solved'].map(f =>
+    h('button.sm'+(filter===f?' p':''), {onclick:()=>{filter=f;pills();queue();}},
+      f[0].toUpperCase()+f.slice(1)+' '+(f==='all'?d.length:d.filter(x=>x.state===f).length))));
+}
+function queue(){
+  const d = db.get().filter(t=>filter==='all'||t.state===filter);
+  fill(view, h('div.pane', grid([
+    {k:'id',t:'Ticket',w:'96px',cell:t=>h('span.mono.small',t.id)},
+    {k:'subj',t:'Subject',cell:t=>h('div',h('div.b',t.subj),h('div.small.muted',t.who))},
+    {k:'pri',t:'Priority',cell:t=>h('span.tag '+PRI[t.pri][0],t.pri)},
+    {k:'state',t:'State',cell:t=>h('span.tag'+(t.state==='solved'?' ok':t.state==='pending'?' warn':''),t.state)},
+    {k:'agent',t:'Agent',cell:t=>h('div.row',{style:{gap:'6px'}},avatar(t.agent,22),h('span.small',t.agent))},
+    {k:'opened',t:'SLA',num:true,cell:t=>t.state==='solved'?h('span.muted.small','met'):
+      h('span.tag '+left(t).c, left(t).s)},
+  ], d, {onRow:open, placeholder:'Search tickets…', empty:'No tickets in this view'})));
+}
+function agents(){
+  const d = db.get();
+  const load = AGENTS.map(a=>({k:a, v:d.filter(t=>t.agent===a&&t.state!=='solved').length}));
+  const bre = d.filter(t=>t.state!=='solved'&&due(t)<Date.now()).length;
+  fill(view, h('div.split',
+    h('div.pane',h('header','Open load per agent'),h('div.body',bars(load.map(x=>({...x,f:x.v+' open'}))))),
+    h('div.col',
+      h('div.grid.k4',
+        h('div.stat',h('div.k','Open'),h('div.v',d.filter(t=>t.state==='open').length)),
+        h('div.stat',h('div.k','Pending'),h('div.v',d.filter(t=>t.state==='pending').length)),
+        h('div.stat',h('div.k','Breached'),h('div.v.'+(bre?'down':'up'),bre)),
+        h('div.stat',h('div.k','Solved'),h('div.v',d.filter(t=>t.state==='solved').length))),
+      h('div.pane',h('header','SLA policy'),h('table',
+        h('thead',h('tr',h('th','Priority'),h('th','First response'))),
+        h('tbody',Object.entries(PRI).map(([k,[c,hh]])=>h('tr',h('td',h('span.tag '+c,k)),h('td.num',hh+' hours')))))))));
+}
+const CANNED = ['Thanks — I can reproduce this and have opened an internal issue.',
+ 'Could you send the request id from the response headers?',
+ 'This is fixed in the current release; please retry and confirm.'];
+function open(t){
+  const log = h('div.chat-log',{style:{maxHeight:'260px'}},
+    t.thread.map(m=>h('div.msg.'+(m.who==='me'?'me':'them'), h('div.who',m.who==='me'?'Agent':t.who), m.t)));
+  const ta = h('textarea',{placeholder:'Reply to '+t.who+'…'});
+  const st = h('select',['open','pending','solved'].map(s=>h('option',{selected:s===t.state},s)));
+  modal(t.id+' · '+t.subj, h('div',
+    h('div.row',{style:{marginBottom:'10px',gap:'6px'}},
+      h('span.tag '+PRI[t.pri][0],t.pri), h('span.tag',t.agent),
+      h('span.tag'+(t.state==='solved'?' ok':''),t.state),
+      h('span.small.muted','opened '+fmt.ago(t.opened))),
+    log, h('div.row',{style:{gap:'6px',margin:'10px 0'}},
+      CANNED.map((c,i)=>h('button.sm',{type:'button',onclick:()=>ta.value=c},'Canned '+(i+1)))),
+    h('div.field',ta), h('div.field',h('label','State'),st)),
+    async () => {
+      const thread = ta.value.trim()? [...t.thread,{who:'me',t:ta.value.trim(),at:Date.now()}] : t.thread;
+      db.set(v=>v.map(x=>x.id===t.id?{...x,state:st.value,thread}:x)); pills(); queue();
+      if(ta.value.trim()){ try{ await submit('deskline.reply',{ticket:t.id,body:ta.value.trim()}); toast('Reply stored in @hanzo/base'); }catch(e){ toast('Reply stored locally'); } }
+    },'Send');
+}
+$('#new').onclick = () => {
+  const s = h('input',{placeholder:'Subject'}), p = h('select',Object.keys(PRI).map(k=>h('option',k)));
+  modal('New ticket', h('div',h('div.field',h('label','Subject'),s),h('div.field',h('label','Priority'),p)),
+    async () => { if(!s.value.trim()) return;
+      const t = {id:'TCK-'+(1500+db.get().length),subj:s.value.trim(),who:'You',pri:p.value,agent:AGENTS[0],
+        state:'open',opened:Date.now(),thread:[{who:'them',t:s.value.trim(),at:Date.now()}]};
+      db.set(v=>[t,...v]); pills(); queue();
+      try{ await submit('deskline.ticket',t); toast('Ticket saved to @hanzo/base'); }catch(e){ toast('Ticket added locally'); } },'Create');
+};
+route({'':queue,'agents':agents,'*':queue}); pills();
+setInterval(()=>{ if(!location.hash.includes('agents')) queue(); }, 30000);
+</script>

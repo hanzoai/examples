@@ -1,0 +1,94 @@
+<!--hz {"title":"Lanes","archetype":"kanban / project management","creator":"apps","desc":"Drag-and-drop kanban board with columns, labels, assignees, WIP limits and a card editor. State persists locally; new cards also post to @hanzo/base.","nav":[["#/","Board"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Sprint board</h1>
+  <span class="tag" id="count"></span>
+  <span class="spacer"></span>
+  <input id="q" placeholder="Filter cards…" style="max-width:220px">
+  <button class="p" id="add">+ New card</button>
+  <button class="g" id="reset">Reset</button>
+</div>
+<div class="scroll-x"><div id="board" style="display:flex;gap:12px;align-items:flex-start;min-width:min-content"></div></div>
+<p class="hz-note" style="margin-top:16px">Drag a card between columns. Cards, people and estimates are synthetic demo data.</p>
+<script>
+const {h,fill,$,$$,store,uid,avatar,toast,modal,submit,fmt} = hz;
+const COLS = [['backlog','Backlog',99],['todo','To do',6],['doing','In progress',3],['review','Review',4],['done','Done',99]];
+const PEOPLE = ['Ada L','Grace H','Linus T','Barbara L','Ken T'];
+const LABELS = {bug:'bad', feature:'acc', chore:'', docs:'ok'};
+const SEED = [
+  ['doing','Ship release retention GC','feature',3,'Ada L'],
+  ['doing','Fix flaky deploy smoke test','bug',2,'Ken T'],
+  ['todo','Document the /v1/sites surface','docs',1,'Grace H'],
+  ['todo','Rate-limit anonymous submissions','feature',5,'Linus T'],
+  ['todo','Prune unused CSS from the kit','chore',1,'Barbara L'],
+  ['review','Content-addressed release rollback','feature',8,'Ada L'],
+  ['backlog','Custom domain verification UX','feature',5,'Grace H'],
+  ['backlog','Audit log export','feature',3,'Ken T'],
+  ['backlog','Dark-mode contrast pass','chore',2,'Barbara L'],
+  ['done','Atomic ActivateRelease','feature',5,'Linus T'],
+  ['done','Wildcard TLS for *.hanzo.app','chore',3,'Ada L'],
+].map(([col,title,label,pts,who]) => ({id:uid(),col,title,label,pts,who}));
+
+const db = store('lanes', SEED);
+let drag = null, q = '';
+
+function render(){
+  const cards = db.get().filter(c => !q || c.title.toLowerCase().includes(q));
+  $('#count').textContent = cards.length + ' cards · ' + cards.reduce((a,c)=>a+c.pts,0) + ' pts';
+  fill($('#board'), COLS.map(([id,name,wip]) => {
+    const mine = cards.filter(c => c.col === id);
+    const over = mine.length > wip;
+    const list = h('div.col',{style:{gap:'8px',minHeight:'60px',padding:'10px'}},
+      mine.map(card),
+      !mine.length && h('div.empty',{style:{padding:'18px'}},'Drop here'));
+    list.addEventListener('dragover', e => { e.preventDefault(); list.style.background='var(--bg3)'; });
+    list.addEventListener('dragleave', () => list.style.background='');
+    list.addEventListener('drop', e => {
+      e.preventDefault(); list.style.background='';
+      if (!drag) return;
+      db.set(v => v.map(c => c.id===drag ? {...c, col:id} : c)); drag=null; render();
+    });
+    return h('div.pane',{style:{width:'262px',flex:'0 0 262px'}},
+      h('header', name,
+        h('span.spacer'),
+        h('span.tag'+(over?' bad':''), mine.length + (wip<99 ? '/'+wip : ''))),
+      list);
+  }));
+}
+function card(c){
+  const el = h('div.card.tight',{draggable:true, style:{cursor:'grab'},
+    onclick:()=>edit(c),
+    ondragstart:e=>{drag=c.id; e.dataTransfer.effectAllowed='move'; el.style.opacity=.4;},
+    ondragend:()=>{el.style.opacity=1;}},
+    h('div.row',{style:{gap:'6px',marginBottom:'6px'}},
+      h('span.tag '+(LABELS[c.label]||''), c.label),
+      h('span.spacer'), h('span.small.muted.num', c.pts+' pts')),
+    h('div',{style:{fontSize:'13.5px',lineHeight:'1.35',marginBottom:'8px'}}, c.title),
+    h('div.row',{style:{gap:'7px'}}, avatar(c.who,24), h('span.small.muted', c.who)));
+  return el;
+}
+function edit(c){
+  const t = h('input',{value:c.title}), p = h('input',{type:'number',value:c.pts,min:0,max:21});
+  const w = h('select', PEOPLE.map(n=>h('option',{selected:n===c.who},n)));
+  const l = h('select', Object.keys(LABELS).map(n=>h('option',{selected:n===c.label},n)));
+  modal('Edit card', h('div',
+    h('div.field', h('label','Title'), t),
+    h('div.row', h('div.field',{style:{flex:'1'}}, h('label','Assignee'), w),
+                 h('div.field',{style:{flex:'1'}}, h('label','Label'), l),
+                 h('div.field',{style:{width:'90px'}}, h('label','Points'), p)),
+    h('button.g',{type:'button',onclick:()=>{db.set(v=>v.filter(x=>x.id!==c.id));render();$('dialog').close();}},'Delete card')),
+    () => { db.set(v=>v.map(x=>x.id===c.id?{...x,title:t.value,who:w.value,label:l.value,pts:+p.value}:x)); render(); });
+}
+$('#add').onclick = () => {
+  const t = h('input',{placeholder:'What needs doing?',required:true});
+  modal('New card', h('div.field', h('label','Title'), t), async () => {
+    if(!t.value.trim()) return;
+    const c = {id:uid(),col:'todo',title:t.value.trim(),label:'feature',pts:3,who:PEOPLE[0]};
+    db.set(v=>[c,...v]); render();
+    try { await submit('lanes.card', c); toast('Card saved to @hanzo/base'); }
+    catch(e){ toast('Card added locally'); }
+  }, 'Add');
+};
+$('#reset').onclick = () => { db.reset(); render(); toast('Board reset'); };
+$('#q').oninput = e => { q = e.target.value.toLowerCase(); render(); };
+render();
+</script>

@@ -1,0 +1,140 @@
+<!--hz {"title":"Prompts","archetype":"AI tooling / prompt library","creator":"ai","desc":"Prompt library and playground: versioned prompts with variables, a template renderer, a word-level diff between any two versions, token and cost estimates per model, and an evaluation grid.","nav":[["#/","Library"],["#/diff","Diff"],["#/evals","Evals"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Prompts</h1><span class="tag" id="kpi"></span>
+  <span class="spacer"></span>
+  <select id="model" style="max-width:190px"></select>
+  <button class="p" id="save">Save version</button>
+</div>
+<div id="view"></div>
+<script>
+const {h,fill,$,store,uid,fmt,esc,toast,submit,route,bars} = hz;
+const MODELS = [['zen-1-mini',0.15,0.60],['zen-1',0.80,2.40],['zen-1-pro',3.00,15.00]];
+const SEED = [
+ {id:'summarise', name:'Summarise a release', vars:['changes','audience'], versions:[
+   {v:1, at:Date.now()-9*864e5, body:'Summarise these changes for {{audience}}.\n\nChanges:\n{{changes}}\n\nKeep it under 80 words.'},
+   {v:2, at:Date.now()-4*864e5, body:'Summarise these changes for {{audience}} in at most 80 words.\n\nChanges:\n{{changes}}\n\nLead with the change that alters behaviour. Omit anything a reader cannot act on.'}]},
+ {id:'triage', name:'Triage a support ticket', vars:['ticket'], versions:[
+   {v:1, at:Date.now()-6*864e5, body:'Classify this ticket by area and severity.\n\n{{ticket}}'},
+   {v:2, at:Date.now()-2*864e5, body:'Classify this ticket.\n\nTicket:\n{{ticket}}\n\nReturn JSON with keys area, severity and one_line_reason. Severity is one of low, normal, high, urgent. If the ticket lacks a reproduction, set needs_repro to true.'}]},
+ {id:'commit', name:'Write a commit message', vars:['diff'], versions:[
+   {v:1, at:Date.now()-12*864e5, body:'Write a commit message for this diff.\n\n{{diff}}'},
+   {v:2, at:Date.now()-1*864e5, body:'Write a commit message for this diff.\n\n{{diff}}\n\nSubject line under 60 characters, imperative mood, no trailing period. Then a blank line, then WHY the change was made — not what changed, which the diff already says.'}]},
+];
+const lib = store('prompts.lib', SEED);
+const vals = store('prompts.vals', {audience:'engineers who operate the service', changes:'- releases are now content-addressed\n- rollback is an activation', ticket:'Deploy returns 413 above four megabytes.', diff:'--- a/x\n+++ b/x'});
+const view = $('#view');
+let cur = SEED[0].id, model = MODELS[1];
+fill($('#model'), MODELS.map(([n,i,o])=>h('option',{value:n},n+'  ·  $'+i+' / $'+o+' per Mtok')));
+$('#model').value = model[0];
+$('#model').onchange = e => { model = MODELS.find(m=>m[0]===e.target.value); render(); };
+const P = () => lib.get().find(p=>p.id===cur) || lib.get()[0];
+const latest = p => p.versions[p.versions.length-1];
+const toks = s => Math.ceil(s.length/4);
+function kpi(){ $('#kpi').textContent = lib.get().length+' prompts · '+
+  lib.get().reduce((a,p)=>a+p.versions.length,0)+' versions'; }
+
+function render(){
+  const p = P(), v = latest(p);
+  const body = h('textarea',{value:v.body,style:{minHeight:'240px',fontFamily:'var(--mono)',fontSize:'13px'}});
+  const out = h('pre',{style:{whiteSpace:'pre-wrap',maxHeight:'260px',overflow:'auto'}});
+  const varBox = h('div.col',{style:{gap:'8px'}});
+  const sync = () => {
+    const used = [...body.value.matchAll(/\{\{(\w+)\}\}/g)].map(m=>m[1]);
+    fill(varBox, [...new Set(used)].map(k=>h('div.field',{style:{margin:0}},
+      h('label',k), h('textarea',{value:vals.get()[k]||'',style:{minHeight:'54px'},
+        oninput:e=>{ vals.set(o=>({...o,[k]:e.target.value})); sync(); }}))));
+    let rendered = body.value;
+    used.forEach(k=>{ rendered = rendered.replaceAll('{{'+k+'}}', vals.get()[k]||'{{'+k+'}}'); });
+    out.textContent = rendered;
+    const t = toks(rendered), est = t/1e6*model[1] + (t*0.6)/1e6*model[2];
+    $('#kpi').textContent = t+' input tokens · est. '+ (est<0.01? '<$0.01' : fmt.money(est)) +
+      ' per call on '+model[0];
+  };
+  body.oninput = sync;
+  fill(view, h('div.split',
+    h('div.pane', h('header','Library', h('span.spacer'),
+        h('button.g.sm',{onclick:()=>{ const n=prompt('Prompt name'); if(!n) return;
+          const id=n.toLowerCase().replace(/\W+/g,'-');
+          lib.set(l=>[...l,{id,name:n,vars:[],versions:[{v:1,at:Date.now(),body:'Write a prompt here. Use {{variable}} placeholders.'}]}]);
+          cur=id; kpi(); render(); }},'+')),
+      h('ul.list', lib.get().map(x=>h('li',{style:{cursor:'pointer',background:x.id===cur?'var(--bg3)':''},
+        onclick:()=>{cur=x.id;render();}},
+        h('div',{style:{minWidth:0}}, h('div.small.b',x.name),
+          h('div.small.muted','v'+latest(x).v+' · '+fmt.ago(latest(x).at))),
+        h('span.spacer'), h('span.tag',x.versions.length+'v')))),
+      h('div.body', h('div.small.muted','Variables'), varBox)),
+    h('div.col',
+      h('div.pane',h('header',p.name+' · v'+v.v),h('div.body', body)),
+      h('div.pane',h('header','Rendered'),h('div.body', out,
+        h('div.row',{style:{marginTop:'10px'}},
+          h('button',{onclick:()=>{navigator.clipboard?.writeText(out.textContent);toast('Copied');}},'Copy rendered'),
+          h('span.spacer'),
+          h('span.small.muted','Rendering is a template substitution — no model is called.')))))));
+  sync();
+  $('#save').onclick = async () => {
+    const nv = {v: latest(p).v+1, at: Date.now(), body: body.value};
+    lib.set(l=>l.map(x=>x.id===p.id?{...x, versions:[...x.versions, nv]}:x));
+    kpi(); render();
+    try{ await submit('prompts.version',{prompt:p.id, version:nv.v, tokens:toks(nv.body)});
+      toast('Version '+nv.v+' saved to @hanzo/base'); }catch(e){ toast('Version saved locally'); }
+  };
+}
+// Word-level diff (longest common subsequence over tokens).
+function diffWords(a, b){
+  const A = a.split(/(\s+)/), B = b.split(/(\s+)/);
+  const m = Array.from({length:A.length+1},()=>new Uint16Array(B.length+1));
+  for(let i=A.length-1;i>=0;i--) for(let j=B.length-1;j>=0;j--)
+    m[i][j] = A[i]===B[j] ? m[i+1][j+1]+1 : Math.max(m[i+1][j], m[i][j+1]);
+  const out=[]; let i=0,j=0;
+  while(i<A.length && j<B.length){
+    if(A[i]===B[j]){ out.push(['=',A[i]]); i++; j++; }
+    else if(m[i+1][j] >= m[i][j+1]){ out.push(['-',A[i]]); i++; }
+    else { out.push(['+',B[j]]); j++; }
+  }
+  while(i<A.length) out.push(['-',A[i++]]);
+  while(j<B.length) out.push(['+',B[j++]]);
+  return out;
+}
+function diffView(){
+  const p = P();
+  const a = h('select', p.versions.map(v=>h('option',{value:v.v},'v'+v.v)));
+  const b = h('select', p.versions.map(v=>h('option',{value:v.v,selected:v===latest(p)},'v'+v.v)));
+  const out = h('div',{style:{whiteSpace:'pre-wrap',lineHeight:'1.7',fontFamily:'var(--mono)',fontSize:'13px'}});
+  const run = () => {
+    const A = p.versions.find(v=>v.v==a.value).body, B = p.versions.find(v=>v.v==b.value).body;
+    const d = diffWords(A,B);
+    fill(out, d.map(([op,t])=>h('span',{style:{
+      background: op==='+'?'rgba(62,207,142,.22)':op==='-'?'rgba(244,104,94,.22)':'',
+      textDecoration: op==='-'?'line-through':'', opacity: op==='-'?0.8:1}}, t)));
+    const add = d.filter(x=>x[0]==='+'&&x[1].trim()).length, del = d.filter(x=>x[0]==='-'&&x[1].trim()).length;
+    $('#kpi').textContent = '+'+add+' words · −'+del+' words';
+  };
+  a.onchange = b.onchange = run;
+  fill(view, h('div.pane',
+    h('header','Compare versions of '+p.name, h('span.spacer'), a, h('span.muted','→'), b),
+    h('div.body', out)));
+  run();
+}
+function evals(){
+  const p = P();
+  const CASES = ['Short input','Long input','Missing variable','Adversarial input','Non-English input'];
+  const rows = p.versions.map(v=>({v, scores: CASES.map((c,i)=>{
+    // A deterministic stand-in score: longer, more specific prompts score higher
+    // on the harder cases. It is a demonstration of the GRID, not a claim.
+    const spec = (v.body.match(/\b(under|at most|return|omit|if|must|do not)\b/gi)||[]).length;
+    return Math.max(1, Math.min(5, Math.round(2 + spec*0.5 - i*0.35 + (v.body.length>200?1:0))));
+  })}));
+  fill(view, h('div.split.r',
+    h('div.pane',h('header','Evaluation grid · '+p.name),
+      h('div.scroll-x',h('table',
+        h('thead',h('tr',h('th','Version'),...CASES.map(c=>h('th',c)),h('th','Mean'))),
+        h('tbody', rows.map(r=>h('tr', h('td.b','v'+r.v.v),
+          ...r.scores.map(s=>h('td',h('span.tag '+(s>=4?'ok':s>=3?'warn':'bad'), s+'/5'))),
+          h('td.num.b',(r.scores.reduce((a,b)=>a+b,0)/CASES.length).toFixed(1)))))))),
+    h('div.pane',h('header','Mean score by version'),h('div.body',
+      bars(rows.map(r=>({k:'v'+r.v.v, v:r.scores.reduce((a,b)=>a+b,0)/CASES.length,
+        f:(r.scores.reduce((a,b)=>a+b,0)/CASES.length).toFixed(1)+' / 5'}))),
+      h('p.hz-note',{style:{marginTop:'12px'}},'Scores are computed by a visible heuristic — it rewards explicit constraints in the prompt — so the grid demonstrates the workflow without pretending a model was graded.')))));
+}
+route({'':()=>{kpi();render();}, 'diff':()=>{kpi();diffView();}, 'evals':()=>{kpi();evals();}, '*':()=>{kpi();render();}});
+</script>

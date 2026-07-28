@@ -1,0 +1,165 @@
+<!--hz {"title":"Review","archetype":"devtool / code review","creator":"data","desc":"Code review tool: a real line-level diff engine (LCS) over two revisions, unified and split views, per-line comments, review state, file tree with per-file statistics and a patch export.","nav":[["#/","Review"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Review</h1><span class="tag" id="stat"></span>
+  <span class="spacer"></span>
+  <span id="modes" class="row" style="gap:4px"></span>
+  <button id="patch">Export patch</button>
+  <button class="p" id="approve">Approve</button>
+</div>
+<div class="split">
+  <div class="pane"><header>Files changed</header><ul class="list" id="files"></ul>
+    <div class="body"><p class="hz-note" style="margin:0">The diff is computed here by a longest-common-subsequence pass over the two revisions — not pre-baked. Edit either side and it recomputes.</p></div></div>
+  <div class="col"><div id="view"></div>
+    <div class="pane"><header>Edit revisions</header><div class="body split" style="gap:10px">
+      <div><label>Before</label><textarea id="a" style="min-height:150px;font-family:var(--mono);font-size:12px"></textarea></div>
+      <div><label>After</label><textarea id="b" style="min-height:150px;font-family:var(--mono);font-size:12px"></textarea></div>
+    </div></div>
+  </div>
+</div>
+<script>
+const {h,fill,$,store,fmt,tabs,toast,submit,route} = hz;
+const FILES = {
+ 'clients/projects/release.go': [
+`func activate(ctx context.Context, slug, id string) error {
+	rel, err := store.Release(ctx, slug, id)
+	if err != nil {
+		return err
+	}
+	return store.SetActive(ctx, slug, rel.ID)
+}`,
+`func activate(ctx context.Context, slug, id string) error {
+	rel, err := store.Release(ctx, slug, id)
+	if err != nil {
+		return err
+	}
+	// Verify the bytes before flipping the pointer: an activation that
+	// promotes a partially uploaded release is worse than a failed deploy,
+	// because it looks like it worked.
+	if err := store.VerifyBytes(ctx, rel); err != nil {
+		return fmt.Errorf("activate %s: %w", id, err)
+	}
+	return store.SetActive(ctx, slug, rel.ID)
+}`],
+ 'clients/sites/reserved.go': [
+`var baseReserved = []string{
+	"api", "admin", "docs", "status",
+}`,
+`var baseReserved = []string{
+	"api", "admin", "docs", "status",
+	// Keep in lock-step with the shared client's OAuth redirect labels:
+	// a publishable label that the client already trusts is an account
+	// takeover, not a naming collision.
+	"www", "stg",
+}`],
+ 'kit/hz.js': [
+`function store(key, initial) {
+  let val = initial;
+  return { get: () => val, set(v) { val = v; } };
+}`,
+`function store(key, initial) {
+  const k = 'hz:' + key, subs = new Set();
+  let val = initial;
+  try { const raw = localStorage.getItem(k); if (raw != null) val = JSON.parse(raw); } catch (e) {}
+  const save = () => { try { localStorage.setItem(k, JSON.stringify(val)); } catch (e) {} };
+  return {
+    get: () => val,
+    set(v) { val = typeof v === 'function' ? v(val) : v; save(); subs.forEach(f => f(val)); return val; },
+    sub(f) { subs.add(f); f(val); return () => subs.delete(f); },
+  };
+}`],
+};
+const comments = store('review.comments', {});
+const approved = store('review.approved', false);
+const view = $('#view');
+let cur = Object.keys(FILES)[0], mode = 'Unified';
+
+function lcsDiff(A, B){
+  const m = Array.from({length:A.length+1},()=>new Uint16Array(B.length+1));
+  for(let i=A.length-1;i>=0;i--) for(let j=B.length-1;j>=0;j--)
+    m[i][j] = A[i]===B[j] ? m[i+1][j+1]+1 : Math.max(m[i+1][j], m[i][j+1]);
+  const out=[]; let i=0,j=0;
+  while(i<A.length && j<B.length){
+    if(A[i]===B[j]) out.push({op:' ', a:i+1, b:j+1, t:A[i++]}), j++;
+    else if(m[i+1][j] >= m[i][j+1]) out.push({op:'-', a:i+1, b:null, t:A[i++]});
+    else out.push({op:'+', a:null, b:j+1, t:B[j++]});
+  }
+  while(i<A.length) out.push({op:'-', a:i+1, b:null, t:A[i++]});
+  while(j<B.length) out.push({op:'+', a:null, b:j+1, t:B[j++]});
+  return out;
+}
+const diffOf = f => lcsDiff(FILES[f][0].split('\n'), FILES[f][1].split('\n'));
+function counts(f){ const d=diffOf(f);
+  return {add:d.filter(x=>x.op==='+').length, del:d.filter(x=>x.op==='-').length}; }
+function files(){
+  const tot = Object.keys(FILES).reduce((a,f)=>{ const c=counts(f); return {add:a.add+c.add, del:a.del+c.del}; },{add:0,del:0});
+  $('#stat').textContent = Object.keys(FILES).length+' files · +'+tot.add+' −'+tot.del +
+    (approved.get()? ' · approved' : '');
+  $('#stat').className = 'tag '+(approved.get()?'ok':'');
+  fill($('#files'), Object.keys(FILES).map(f=>{ const c=counts(f);
+    const n = Object.keys(comments.get()).filter(k=>k.startsWith(f+':')).length;
+    return h('li',{style:{cursor:'pointer',background:f===cur?'var(--bg3)':''},
+      onclick:()=>{cur=f; load(); render();}},
+      h('div',{style:{minWidth:0}}, h('div.mono.small.trunc',f.split('/').pop()),
+        h('div.small.muted.trunc',f)),
+      h('span.spacer'),
+      n? h('span.tag.acc',n+'💬'):null,
+      h('span.small.up','+'+c.add), h('span.small.down','−'+c.del)); }));
+}
+function lineRow(l, side){
+  const key = cur+':'+(l.b||('a'+l.a));
+  const cm = comments.get()[key];
+  const bg = l.op==='+'? 'rgba(62,207,142,.10)' : l.op==='-'? 'rgba(244,104,94,.10)' : '';
+  const row = h('div',{style:{display:'grid',gridTemplateColumns:'46px 46px 14px 1fr',
+    fontFamily:'var(--mono)',fontSize:'12.5px',lineHeight:'1.65',background:bg,cursor:'pointer'},
+    onclick:()=>comment(key)},
+    h('span.muted',{style:{textAlign:'right',paddingRight:'8px',opacity:.6}}, l.a??''),
+    h('span.muted',{style:{textAlign:'right',paddingRight:'8px',opacity:.6}}, l.b??''),
+    h('span',{style:{color: l.op==='+'?'var(--ok)':l.op==='-'?'var(--bad)':'var(--fg3)'}}, l.op),
+    h('span',{style:{whiteSpace:'pre-wrap',paddingLeft:'6px'}}, l.t || ' '));
+  return cm ? h('div', row, h('div.card.tight',{style:{margin:'4px 0 4px 106px',borderColor:'var(--acc)'}},
+    h('div.small.b','Reviewer note'), h('div.small',cm),
+    h('button.g.sm',{style:{marginTop:'4px'},onclick:e=>{e.stopPropagation();
+      comments.set(v=>{const n={...v}; delete n[key]; return n;}); render();}},'Resolve'))) : row;
+}
+function comment(key){
+  const t = prompt('Comment on this line'); if(!t) return;
+  comments.set(v=>({...v,[key]:t})); files(); render();
+  submit('review.comment',{file:cur, line:key.split(':')[1], body:t}).catch(()=>{});
+}
+function render(){
+  const d = diffOf(cur);
+  if(mode==='Unified'){
+    fill(view, h('div.pane', h('header',cur,h('span.spacer'),
+        h('span.small.up','+'+counts(cur).add),h('span.small.down','−'+counts(cur).del)),
+      h('div',{style:{padding:'10px 0',overflow:'auto'}}, d.map(l=>lineRow(l)))));
+  } else {
+    const left = d.filter(l=>l.op!=='+'), right = d.filter(l=>l.op!=='-');
+    fill(view, h('div.pane', h('header',cur+' — split'),
+      h('div.split',{style:{gap:'0',padding:'10px 0'}},
+        h('div',{style:{overflow:'auto',borderRight:'1px solid var(--line)'}}, left.map(l=>lineRow(l))),
+        h('div',{style:{overflow:'auto'}}, right.map(l=>lineRow(l))))));
+  }
+}
+function load(){ $('#a').value = FILES[cur][0]; $('#b').value = FILES[cur][1]; }
+['#a','#b'].forEach((s,i)=>$(s).addEventListener('input', ()=>{
+  FILES[cur][i] = $(s).value; files(); render(); }));
+$('#patch').onclick = () => {
+  const patch = Object.keys(FILES).map(f=>{
+    const d = lcsDiff(FILES[f][0].split('\n'), FILES[f][1].split('\n'));
+    return '--- a/'+f+'\n+++ b/'+f+'\n' + d.map(l=>l.op+l.t).join('\n');
+  }).join('\n\n');
+  h('a',{download:'review.patch',href:URL.createObjectURL(new Blob([patch],{type:'text/plain'}))}).click();
+  toast('Patch exported');
+};
+$('#approve').onclick = async () => {
+  approved.set(!approved.get()); files();
+  if(approved.get()){
+    try{ await submit('review.approve',{files:Object.keys(FILES).length,
+      comments:Object.keys(comments.get()).length}); toast('Review approved and recorded'); }
+    catch(e){ toast('Approved locally'); }
+  } else toast('Approval withdrawn');
+};
+fill($('#modes'), tabs(['Unified','Split'], m=>{mode=m; render();}));
+route({'*':()=>{}});
+files(); load(); render();
+</script>

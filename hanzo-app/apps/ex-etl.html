@@ -1,0 +1,122 @@
+<!--hz {"title":"Sluice","archetype":"data / ETL tool","creator":"data","desc":"Visual data pipeline: paste or load CSV, chain real transform steps (filter, map, derive, group, sort, limit), see row counts flow between stages, profile columns and export JSON or CSV.","nav":[["#/","Pipeline"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Sluice</h1><span class="tag acc" id="flow"></span>
+  <span class="spacer"></span>
+  <button id="sample">Load sample</button>
+  <button id="csv">Export CSV</button><button id="json">Export JSON</button>
+  <button class="p" id="save">Save run</button>
+</div>
+<div class="split">
+  <div class="col">
+    <div class="pane"><header>Source</header><div class="body">
+      <textarea id="src" style="min-height:150px;font-family:var(--mono);font-size:12px" placeholder="Paste CSV with a header row…"></textarea>
+      <div class="row" style="margin-top:8px"><button class="p" id="parse">Parse</button><span class="small muted" id="pinfo"></span></div>
+    </div></div>
+    <div class="pane"><header>Steps <span class="spacer"></span><button class="g sm" id="add">+ Step</button></header>
+      <ul class="list" id="steps"></ul></div>
+    <div class="pane"><header>Column profile</header><div class="body" id="profile"></div></div>
+  </div>
+  <div class="pane"><header>Output <span class="spacer"></span><span class="small muted" id="rows"></span></header>
+    <div class="scroll-x" id="table" style="max-height:60vh;overflow:auto"></div></div>
+</div>
+<p class="hz-note" style="margin-top:14px">Every transform runs on your data in this page. The sample dataset is synthetic.</p>
+<script>
+const {h,fill,$,store,rng,range,pick,fmt,bars,modal,toast,submit} = hz;
+const r = rng(4711);
+const REG = ['NA','EMEA','APAC'];
+const SAMPLE = ['region,product,units,unit_price,month',
+  ...range(60,i=>[pick(r,REG), pick(r,['Atlas','Meridian','Ferry','Quarry']),
+    Math.round(5+r()*95), (9+r()*180).toFixed(2),
+    ['2026-01','2026-02','2026-03','2026-04'][i%4]].join(','))].join('\n');
+const STEPS = {
+  filter:{args:['column','op','value'], run:(rows,a)=>rows.filter(x=>{
+    const v=x[a.column], t=a.value, n=parseFloat(v), tn=parseFloat(t);
+    return a.op==='='? String(v)===t : a.op==='!='? String(v)!==t
+      : a.op==='>'? n>tn : a.op==='<'? n<tn : String(v).includes(t); })},
+  derive:{args:['name','expr'], run:(rows,a)=>rows.map(x=>({...x,
+    [a.name]: (()=>{ try{ return Function(...Object.keys(x), 'return ('+a.expr+')')(
+      ...Object.values(x).map(v=>isNaN(parseFloat(v))?v:parseFloat(v))); }catch(e){ return null; } })()}))},
+  group:{args:['by','agg','column'], run:(rows,a)=>{
+    const m = new Map();
+    rows.forEach(x=>{ const k=x[a.by]; const g=m.get(k)||[]; g.push(x); m.set(k,g); });
+    return [...m].map(([k,g])=>({[a.by]:k, n:g.length,
+      [a.agg+'_'+a.column]: a.agg==='sum'? g.reduce((s,x)=>s+(parseFloat(x[a.column])||0),0)
+        : a.agg==='avg'? g.reduce((s,x)=>s+(parseFloat(x[a.column])||0),0)/g.length
+        : a.agg==='max'? Math.max(...g.map(x=>parseFloat(x[a.column])||0))
+        : Math.min(...g.map(x=>parseFloat(x[a.column])||0))})); }},
+  sort:{args:['column','dir'], run:(rows,a)=>[...rows].sort((x,y)=>{
+    const p=x[a.column],q=y[a.column], n=parseFloat(p),m2=parseFloat(q);
+    const c = (!isNaN(n)&&!isNaN(m2)) ? n-m2 : String(p).localeCompare(String(q));
+    return a.dir==='desc'? -c : c; })},
+  limit:{args:['n'], run:(rows,a)=>rows.slice(0,+a.n||10)},
+  select:{args:['columns'], run:(rows,a)=>{ const ks=a.columns.split(',').map(s=>s.trim()).filter(Boolean);
+    return rows.map(x=>Object.fromEntries(ks.map(k=>[k,x[k]]))); }},
+};
+const pipe = store('sluice.pipe', [
+  {op:'derive', a:{name:'revenue', expr:'units * unit_price'}},
+  {op:'group', a:{by:'region', agg:'sum', column:'revenue'}},
+  {op:'sort', a:{column:'sum_revenue', dir:'desc'}},
+]);
+let src = [], counts = [];
+
+function parse(text){
+  const lines = text.trim().split(/\r?\n/).filter(Boolean);
+  if(!lines.length) return [];
+  const head = lines[0].split(',').map(s=>s.trim());
+  return lines.slice(1).map(l=>{ const c=l.split(','); return Object.fromEntries(head.map((k,i)=>[k,(c[i]??'').trim()])); });
+}
+function run(){
+  let rows = src; counts = [rows.length];
+  pipe.get().forEach(s=>{ try{ rows = STEPS[s.op].run(rows, s.a); }catch(e){} counts.push(rows.length); });
+  return rows;
+}
+function render(){
+  const out = run();
+  $('#rows').textContent = out.length+' rows × '+(out[0]?Object.keys(out[0]).length:0)+' columns';
+  $('#flow').textContent = counts.join(' → ')+' rows';
+  const cols = out[0]? Object.keys(out[0]) : [];
+  fill($('#table'), out.length? h('table',
+    h('thead',h('tr',cols.map(c=>h('th',c)))),
+    h('tbody', out.slice(0,200).map(x=>h('tr', cols.map(c=>h('td'+(isNaN(parseFloat(x[c]))?'':'.num'),
+      typeof x[c]==='number'? fmt.n(x[c], x[c]%1?2:0) : String(x[c]??''))))))) : h('div.empty','No rows — parse a source first.'));
+  fill($('#steps'), pipe.get().map((s,i)=>h('li',
+    h('span.tag.acc',i+1), h('div',{style:{minWidth:0}},
+      h('div.b',s.op), h('div.small.muted.trunc',Object.entries(s.a).map(([k,v])=>k+'='+v).join(' · '))),
+    h('span.spacer'), h('span.small.muted',counts[i+1]+' rows'),
+    h('button.g.sm',{onclick:()=>edit(i)},'✎'),
+    h('button.g.sm',{onclick:()=>{pipe.set(v=>v.filter((_,j)=>j!==i));render();}},'✕'))));
+  const num = cols.filter(c=>out.some(x=>!isNaN(parseFloat(x[c]))));
+  fill($('#profile'), num.length? h('div.col',{style:{gap:'12px'}}, num.slice(0,4).map(c=>{
+    const vals = out.map(x=>parseFloat(x[c])).filter(v=>!isNaN(v));
+    return h('div', h('div.row',h('span.small.b',c),h('span.spacer'),
+      h('span.small.muted','min '+fmt.n(Math.min(...vals),1)+' · max '+fmt.n(Math.max(...vals),1)+
+        ' · avg '+fmt.n(vals.reduce((a,b)=>a+b,0)/vals.length,1))),
+      h('div.bar',{style:{marginTop:'4px'}},h('i',{style:{width:'100%'}})));
+  })) : h('p.small.muted','No numeric columns in the output.'));
+}
+function edit(i){
+  const s = pipe.get()[i] || {op:'filter', a:{}};
+  const opSel = h('select', Object.keys(STEPS).map(k=>h('option',{selected:k===s.op},k)));
+  const box = h('div');
+  const fields = () => fill(box, STEPS[opSel.value].args.map(k=>
+    h('div.field',h('label',k), h('input',{value:s.a[k]??'', 'data-k':k}))));
+  opSel.onchange = fields; fields();
+  modal(i<pipe.get().length?'Edit step':'Add step', h('div',h('div.field',h('label','Operation'),opSel),box),
+    ()=>{ const a = Object.fromEntries([...box.querySelectorAll('input')].map(el=>[el.dataset.k, el.value]));
+      pipe.set(v=>{ const n=[...v]; if(i<n.length) n[i]={op:opSel.value,a}; else n.push({op:opSel.value,a}); return n; });
+      render(); });
+}
+$('#add').onclick = () => edit(pipe.get().length);
+$('#parse').onclick = () => { src = parse($('#src').value);
+  $('#pinfo').textContent = src.length+' rows, '+(src[0]?Object.keys(src[0]).length:0)+' columns';
+  render(); toast('Parsed '+src.length+' rows'); };
+$('#sample').onclick = () => { $('#src').value = SAMPLE; $('#parse').click(); };
+const dl = (name,text,type) => { const b=new Blob([text],{type}); const a=h('a',{download:name,href:URL.createObjectURL(b)}); a.click(); };
+$('#json').onclick = () => dl('sluice.json', JSON.stringify(run(),null,2), 'application/json');
+$('#csv').onclick = () => { const out=run(); if(!out.length) return toast('Nothing to export');
+  const cols=Object.keys(out[0]);
+  dl('sluice.csv', [cols.join(','), ...out.map(x=>cols.map(c=>x[c]).join(','))].join('\n'), 'text/csv'); };
+$('#save').onclick = async () => { try{ await submit('sluice.run',{steps:pipe.get(), inRows:counts[0], outRows:counts[counts.length-1]});
+  toast('Pipeline run saved to @hanzo/base'); }catch(e){ toast('Save failed'); } };
+$('#sample').click();
+</script>

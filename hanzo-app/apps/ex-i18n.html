@@ -1,0 +1,101 @@
+<!--hz {"title":"Strings","archetype":"devtool / localisation","creator":"data","desc":"Localisation manager: a string catalogue across five locales, completeness and missing-key reporting, ICU plural and interpolation checking, an inline editor and export to JSON, gettext PO or a flat key file.","nav":[["#/","Catalogue"],["#/health","Health"],["#/export","Export"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Strings</h1><span class="tag" id="kpi"></span>
+  <span class="spacer"></span>
+  <select id="locale" style="max-width:170px"></select>
+  <input id="q" placeholder="Filter keys…" style="max-width:200px">
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:16px">Translations here are illustrative demonstration strings, not professionally localised copy. The checks — missing keys, placeholder mismatch, plural-form coverage — are real.</p>
+<script>
+const {h,fill,$,store,fmt,grid,bars,toast,submit,route} = hz;
+const LOCALES = [['en','English','base'],['de','Deutsch',''],['fr','Français',''],['ja','日本語',''],['pt','Português','']];
+const CAT = store('i18n.cat', {
+  'nav.dashboard': {en:'Dashboard', de:'Übersicht', fr:'Tableau de bord', ja:'ダッシュボード', pt:'Painel'},
+  'nav.projects': {en:'Projects', de:'Projekte', fr:'Projets', ja:'プロジェクト', pt:'Projetos'},
+  'nav.settings': {en:'Settings', de:'Einstellungen', fr:'Paramètres', ja:'設定', pt:''},
+  'deploy.button': {en:'Deploy', de:'Bereitstellen', fr:'Déployer', ja:'デプロイ', pt:'Publicar'},
+  'deploy.success': {en:'Deployed to {host}', de:'Bereitgestellt auf {host}', fr:'Déployé sur {host}', ja:'{host} にデプロイしました', pt:'Publicado em {host}'},
+  'deploy.error': {en:'Deploy failed: {reason}', de:'Bereitstellung fehlgeschlagen: {reason}', fr:'Échec du déploiement : {reason}', ja:'', pt:'Falha ao publicar: {reason}'},
+  'release.count': {en:'{n, plural, one {# release} other {# releases}}', de:'{n, plural, one {# Version} other {# Versionen}}', fr:'{n, plural, one {# version} other {# versions}}', ja:'{n, plural, other {# 個のリリース}}', pt:''},
+  'file.count': {en:'{n, plural, one {# file} other {# files}}', de:'{n, plural, one {# Datei} other {# Dateien}}', fr:'', ja:'{n, plural, other {# 個のファイル}}', pt:'{n, plural, one {# ficheiro} other {# ficheiros}}'},
+  'rollback.confirm': {en:'Activate release {id}? This cannot be undone automatically.', de:'Version {id} aktivieren? Dies kann nicht automatisch rückgängig gemacht werden.', fr:'', ja:'', pt:''},
+  'domain.pending': {en:'Waiting for the verification record', de:'Warte auf den Verifizierungseintrag', fr:'En attente de l’enregistrement de vérification', ja:'検証レコードを待っています', pt:'A aguardar o registo de verificação'},
+  'limit.body': {en:'The request body is capped at {mb} MiB', de:'Der Anfragekörper ist auf {mb} MiB begrenzt', fr:'Le corps de la requête est limité à {mb} Mio', ja:'', pt:''},
+  'empty.projects': {en:'No projects yet', de:'Noch keine Projekte', fr:'Aucun projet', ja:'プロジェクトはまだありません', pt:'Ainda não há projetos'},
+});
+const view = $('#view');
+let loc = 'de', q = '';
+fill($('#locale'), LOCALES.filter(l=>l[0]!=='en').map(([k,n])=>h('option',{value:k},n)));
+$('#locale').onchange = e => { loc = e.target.value; go(); };
+$('#q').oninput = e => { q = e.target.value.toLowerCase(); go(); };
+
+const ph = s => [...String(s||'').matchAll(/\{(\w+)/g)].map(m=>m[1]);
+const plurals = s => [...String(s||'').matchAll(/\b(zero|one|two|few|many|other)\s*\{/g)].map(m=>m[1]);
+function issues(key, l){
+  const base = CAT.get()[key].en, val = CAT.get()[key][l];
+  const out = [];
+  if(!val) return ['missing'];
+  const a = new Set(ph(base)), b = new Set(ph(val));
+  [...a].forEach(x=>{ if(!b.has(x)) out.push('missing {'+x+'}'); });
+  [...b].forEach(x=>{ if(!a.has(x)) out.push('extra {'+x+'}'); });
+  if(base.includes('plural') && !val.includes('plural')) out.push('not pluralised');
+  return out;
+}
+function kpi(){ const keys=Object.keys(CAT.get());
+  const done = keys.filter(k=>CAT.get()[k][loc]).length;
+  $('#kpi').textContent = keys.length+' keys · '+loc+' '+Math.round(done/keys.length*100)+'% complete'; }
+function catalogue(){
+  const rows = Object.entries(CAT.get())
+    .filter(([k,v])=>!q || k.toLowerCase().includes(q) || (v.en||'').toLowerCase().includes(q))
+    .map(([k,v])=>({k, en:v.en, tr:v[loc]||'', iss:issues(k,loc)}));
+  fill(view, h('div.pane', grid([
+    {k:'k',t:'Key',w:'190px',cell:r=>h('span.mono.small',r.k)},
+    {k:'en',t:'English (source)',cell:r=>h('span.small',r.en)},
+    {k:'tr',t:LOCALES.find(l=>l[0]===loc)[1],cell:r=>{
+      const inp = h('input',{value:r.tr, style:{fontSize:'13px',padding:'5px 7px'},
+        onclick:e=>e.stopPropagation(),
+        onchange:e=>{ CAT.set(c=>({...c,[r.k]:{...c[r.k],[loc]:e.target.value}}));
+          kpi(); catalogue(); submit('i18n.edit',{key:r.k,locale:loc}).catch(()=>{}); }});
+      return inp; }},
+    {k:'iss',t:'Checks',w:'170px',cell:r=>r.iss.length
+      ? h('div.row',{style:{gap:'4px',flexWrap:'wrap'}}, r.iss.map(i=>h('span.tag '+(i==='missing'?'bad':'warn'),i)))
+      : h('span.tag.ok','ok')},
+  ], rows, {noSearch:true})));
+}
+function health(){
+  const keys = Object.keys(CAT.get());
+  const per = LOCALES.map(([k,n])=>({k:n, code:k,
+    done: keys.filter(x=>CAT.get()[x][k]).length,
+    bad: keys.filter(x=>CAT.get()[x][k] && issues(x,k).length).length}));
+  fill(view, h('div.split.r',
+    h('div.pane',h('header','Completeness'),h('div.body',
+      bars(per.map(p=>({k:p.k, v:p.done/keys.length*100,
+        f:p.done+' / '+keys.length+'  ·  '+Math.round(p.done/keys.length*100)+'%'}))))),
+    h('div.pane',h('header','Problems by locale'),
+      h('table',h('thead',h('tr',h('th','Locale'),h('th','Missing'),h('th','Placeholder / plural'),h('th','Ready'))),
+        h('tbody', per.map(p=>h('tr', h('td.b',p.k+' ('+p.code+')'),
+          h('td.num'+(keys.length-p.done?'.down':''), keys.length-p.done),
+          h('td.num'+(p.bad?'.down':''), p.bad),
+          h('td', (keys.length-p.done||p.bad)? h('span.tag.warn','no') : h('span.tag.ok','yes')))))))));
+}
+function exportView(){
+  const cat = CAT.get(), keys = Object.keys(cat);
+  const json = JSON.stringify(Object.fromEntries(keys.map(k=>[k, cat[k][loc]||''])), null, 2);
+  const po = keys.map(k=>'#: '+k+'\nmsgid "'+String(cat[k].en).replace(/"/g,'\\"')+'"\nmsgstr "'+
+    String(cat[k][loc]||'').replace(/"/g,'\\"')+'"').join('\n\n');
+  const flat = keys.map(k=>k+' = '+(cat[k][loc]||'')).join('\n');
+  const box = (title, text, name) => h('div.pane', h('header',title,h('span.spacer'),
+      h('button.sm',{onclick:()=>{navigator.clipboard?.writeText(text);toast('Copied');}},'Copy'),
+      h('button.sm',{onclick:()=>{ h('a',{download:name,href:URL.createObjectURL(
+        new Blob([text],{type:'text/plain'}))}).click();
+        submit('i18n.export',{locale:loc,format:name.split('.').pop()}).catch(()=>{}); }},'Download')),
+    h('div.body',h('pre',{style:{maxHeight:'260px',overflow:'auto'}},text)));
+  fill(view, h('div.col', box('JSON · '+loc+'.json', json, loc+'.json'),
+    box('gettext PO · '+loc+'.po', po, loc+'.po'),
+    box('Flat key file · '+loc+'.properties', flat, loc+'.properties')));
+}
+const go = () => { kpi(); const at=location.hash.replace(/^#\/?/,'');
+  at==='health'? health() : at==='export'? exportView() : catalogue(); };
+route({'':go,'health':go,'export':go,'*':go});
+</script>

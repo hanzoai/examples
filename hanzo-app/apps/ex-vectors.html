@@ -1,0 +1,124 @@
+<!--hz {"title":"Vectors","archetype":"RAG / embedding search","creator":"ai","desc":"Embedding search laid bare: documents are vectorised with a hashed bag-of-words model in the page, projected to 2D with power iteration PCA, and queried by cosine similarity with the ranking shown alongside the plot.","nav":[["#/","Explore"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Vectors</h1><span class="tag" id="dim"></span>
+  <span class="spacer"></span>
+  <input id="q" placeholder="Query the index…" style="max-width:320px" value="how do I undo a bad deploy">
+  <button class="p" id="go">Search</button>
+</div>
+<div class="split r">
+  <div class="pane"><header>2-D projection <span class="spacer"></span><span class="small muted">PCA of the embedding space</span></header>
+    <canvas id="p" style="width:100%;display:block;background:var(--bg);aspect-ratio:16/10;cursor:crosshair"></canvas>
+    <div class="body"><p class="hz-note" style="margin:0">Blue points are documents; the amber point is your query. Distance on this plot is a 2-D shadow of the full space, so the ranking on the right is the authority.</p></div></div>
+  <div class="col">
+    <div class="pane"><header>Ranked results</header><ul class="list" id="hits"></ul></div>
+    <div class="pane"><header>How it works</header><div class="body">
+      <p class="small">Each document is tokenised, stop-words are dropped, and every remaining term is hashed into one of <b id="d2"></b> dimensions with a TF weighting. Vectors are L2-normalised, so cosine similarity is a dot product.</p>
+      <p class="small">Nothing is sent anywhere. This is a real, if small, retrieval index — the point is that the mechanics of RAG are simple enough to read.</p></div></div>
+  </div>
+</div>
+<script>
+const {h,fill,$,fmt,toast,submit} = hz;
+const DOCS = [
+ ['Rollback','Activating an earlier release id. Activation is an atomic pointer flip, so a rollback needs no rebuild and no redeploy. Recovery time stops depending on build time.'],
+ ['Content addressing','A release id is the digest of its file manifest. Publishing identical content twice yields one release, because the id is derived from the content itself.'],
+ ['Atomic activation','Serving is a pointer and activation moves it. A reader observes the whole old release or the whole new one, never a mixture of the two.'],
+ ['Deploy manifest','A deploy is a list of paths and their contents. There is no build server in the path, so the same input always produces the same output.'],
+ ['Submissions collection','Every project space carries one collection for generic capture. Anyone may create a record; reads stay private to the space owner.'],
+ ['Open create closed read','Opening create while closing read bounds the blast radius of an anonymous endpoint to storage rather than disclosure of other people’s data.'],
+ ['Reserved labels','Names that can never become a site slug, because they are platform surfaces or phishing-sensitive words that an OAuth client already trusts.'],
+ ['Wildcard certificates','A wildcard covers exactly one label. It matches a subdomain but never the bare apex, which needs its own name on the certificate.'],
+ ['Edge cache','Sixty seconds in the browser and a day at the edge, purged when a release is activated so a stale object never outlives its release.'],
+ ['Request size limits','A deploy body is capped at four mebibytes. Large media belongs in object storage and should be referenced rather than inlined in the manifest.'],
+ ['Cold start','Most of a cold start is work done at boot that could be done lazily. Moving it off the boot path took ours from nine hundred to one hundred and twenty milliseconds.'],
+ ['Custom domains','Bind the domain, publish the verification record, and the certificate issues automatically. The site keeps serving on its default subdomain until then.'],
+];
+const D = 96;
+$('#dim').textContent = D+' dimensions · '+DOCS.length+' documents';
+$('#d2').textContent = D;
+const STOP = new Set('a an the and or of to in is are for it that this be on with as by from how do does can what when where you your we our'.split(' '));
+const tok = s => (s.toLowerCase().match(/[a-z0-9]+/g)||[]).filter(w=>!STOP.has(w)&&w.length>2);
+function hash(s){ let a=2166136261; for(const c of s){ a^=c.charCodeAt(0); a=Math.imul(a,16777619);} return (a>>>0)%D; }
+function embed(text){
+  const v = new Float64Array(D);
+  tok(text).forEach(w=>{ v[hash(w)] += 1; v[hash(w+'#2')] += 0.55; });
+  let n = Math.hypot(...v) || 1;
+  for(let i=0;i<D;i++) v[i]/=n;
+  return v;
+}
+const E = DOCS.map(([t,b])=>({t, b, v: embed(t+' '+t+' '+b)}));
+const dot = (a,b)=>{ let s=0; for(let i=0;i<D;i++) s+=a[i]*b[i]; return s; };
+// PCA by power iteration on the covariance of the (centred) document matrix.
+function pca(vs){
+  const mean = new Float64Array(D);
+  vs.forEach(v=>{ for(let i=0;i<D;i++) mean[i]+=v[i]/vs.length; });
+  const X = vs.map(v=>{ const o=new Float64Array(D); for(let i=0;i<D;i++) o[i]=v[i]-mean[i]; return o; });
+  const axis = (skip) => {
+    let w = new Float64Array(D).map(()=>Math.random()-0.5);
+    for(let it=0; it<80; it++){
+      const nw = new Float64Array(D);
+      X.forEach(x=>{ const p = dot(x,w); for(let i=0;i<D;i++) nw[i] += p*x[i]; });
+      if(skip){ const p = dot(nw, skip); for(let i=0;i<D;i++) nw[i] -= p*skip[i]; }
+      const n = Math.hypot(...nw)||1; for(let i=0;i<D;i++) nw[i]=nw[i]/n;
+      w = nw;
+    }
+    return w;
+  };
+  const a1 = axis(null), a2 = axis(a1);
+  return {mean, a1, a2};
+}
+const P = pca(E.map(e=>e.v));
+const project = v => { const c=new Float64Array(D);
+  for(let i=0;i<D;i++) c[i]=v[i]-P.mean[i];
+  return [dot(c,P.a1), dot(c,P.a2)]; };
+E.forEach(e=>e.p = project(e.v));
+let qv = null, qp = null, ranked = [];
+
+const cv = $('#p'), cx = cv.getContext('2d');
+function draw(){
+  const dpr = Math.min(devicePixelRatio||1,2);
+  cv.width = Math.round(cv.clientWidth*dpr); cv.height = Math.round(cv.width*10/16);
+  const pts = [...E.map(e=>e.p), ...(qp?[qp]:[])];
+  const xs = pts.map(p=>p[0]), ys = pts.map(p=>p[1]);
+  const pad = 46*dpr;
+  const sx = v => pad + (v-Math.min(...xs))/((Math.max(...xs)-Math.min(...xs))||1)*(cv.width-pad*2);
+  const sy = v => pad + (v-Math.min(...ys))/((Math.max(...ys)-Math.min(...ys))||1)*(cv.height-pad*2);
+  cx.clearRect(0,0,cv.width,cv.height);
+  cx.strokeStyle='rgba(128,128,128,.14)'; cx.lineWidth=1;
+  for(let i=0;i<=6;i++){ const y=pad+(cv.height-pad*2)*i/6, x=pad+(cv.width-pad*2)*i/6;
+    cx.beginPath(); cx.moveTo(pad,y); cx.lineTo(cv.width-pad,y); cx.stroke();
+    cx.beginPath(); cx.moveTo(x,pad); cx.lineTo(x,cv.height-pad); cx.stroke(); }
+  if(qp) E.forEach(e=>{ const s = qv? dot(e.v,qv):0;
+    if(s<=0.05) return;
+    cx.strokeStyle=`rgba(246,183,60,${Math.min(0.75, s*1.3).toFixed(2)})`;
+    cx.lineWidth=1.5*dpr; cx.beginPath();
+    cx.moveTo(sx(qp[0]),sy(qp[1])); cx.lineTo(sx(e.p[0]),sy(e.p[1])); cx.stroke(); });
+  E.forEach((e,i)=>{
+    const s = qv? dot(e.v,qv) : 0;
+    const rank = ranked.findIndex(x=>x.t===e.t);
+    cx.beginPath(); cx.arc(sx(e.p[0]),sy(e.p[1]), (rank>=0&&rank<3? 9:6)*dpr, 0, 7);
+    cx.fillStyle = rank===0? '#3ecf8e' : rank>0&&rank<3? '#5b8cff' : 'rgba(91,140,255,.45)';
+    cx.fill();
+    cx.fillStyle='rgba(200,208,224,.85)'; cx.font=(11*dpr)+'px system-ui';
+    cx.fillText(e.t, sx(e.p[0])+10*dpr, sy(e.p[1])+4*dpr);
+  });
+  if(qp){ cx.beginPath(); cx.arc(sx(qp[0]),sy(qp[1]), 10*dpr, 0, 7);
+    cx.fillStyle='#f6b73c'; cx.fill();
+    cx.strokeStyle='rgba(246,183,60,.4)'; cx.lineWidth=2*dpr;
+    cx.beginPath(); cx.arc(sx(qp[0]),sy(qp[1]), 17*dpr, 0, 7); cx.stroke(); }
+}
+function search(){
+  const q = $('#q').value.trim();
+  if(!q) return toast('Type a query first');
+  qv = embed(q); qp = project(qv);
+  ranked = E.map(e=>({t:e.t, b:e.b, s: dot(e.v, qv)})).sort((a,b)=>b.s-a.s);
+  fill($('#hits'), ranked.slice(0,6).map((x,i)=>h('li',
+    h('span.tag'+(i===0?'.ok':i<3?'.acc':''), (x.s*100).toFixed(0)+'%'),
+    h('div',{style:{minWidth:0}}, h('div.b',x.t), h('div.small.muted', x.b.slice(0,84)+'…')))));
+  draw();
+  submit('vectors.query',{q, top: ranked[0]?.t}).catch(()=>{});
+}
+$('#go').onclick = search;
+$('#q').addEventListener('keydown', e => { if(e.key==='Enter') search(); });
+addEventListener('resize', draw);
+draw(); search();
+</script>

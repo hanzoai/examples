@@ -1,0 +1,133 @@
+<!--hz {"title":"Menu","archetype":"ecommerce / table ordering","creator":"web","desc":"Restaurant table ordering: QR-style table code, menu by course with dietary filters and modifiers, a running tab, split-bill calculator with tip, and the order sent to @hanzo/base.","nav":[["#/","Menu"],["#/tab","Your tab"],["#/split","Split the bill"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Nightjar</h1>
+  <span class="tag acc" id="table"></span>
+  <span class="spacer"></span>
+  <span id="diet" class="row" style="gap:4px"></span>
+  <a class="btn" href="#/tab" id="tabBtn">Tab</a>
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:16px">A demonstration ordering flow. Nothing is cooked, nothing is charged, and the restaurant is invented.</p>
+<script>
+const {h,fill,$,store,uid,fmt,modal,toast,submit,route} = hz;
+const M = [
+ ['Small plates','Charred leek, hazelnut, brown butter',9,['v'],['Extra hazelnut +1.5']],
+ ['Small plates','Chickpea fritters, harissa yoghurt',8,['v','gf'],[]],
+ ['Small plates','Cured trout, cucumber, dill oil',12,['gf'],[]],
+ ['Small plates','Sourdough and cultured butter',5,['v'],['Make it two +3']],
+ ['Large plates','Braised short rib, celeriac, bone jus',26,[],['Medium','Medium rare']],
+ ['Large plates','Hake, brown shrimp, sea herbs',24,['gf'],[]],
+ ['Large plates','Pumpkin and sage agnolotti',19,['v'],['Add pecorino +2']],
+ ['Large plates','Aged sirloin, bone marrow, watercress',34,['gf'],['Rare','Medium rare','Medium']],
+ ['Sides','Triple-cooked chips',6,['v','gf'],['With rosemary salt']],
+ ['Sides','Bitter leaves, mustard dressing',6,['v','gf','vg'],[]],
+ ['Puddings','Burnt basque cheesecake',9,['v'],[]],
+ ['Puddings','Poached pear, oat crumble',8,['v','vg'],[]],
+ ['Drinks','House red, glass',8,['vg','gf'],['175ml','250ml']],
+ ['Drinks','Saison, 330ml',6,['vg'],[]],
+ ['Drinks','Seedlip and tonic',7,['vg','gf'],[]],
+].map(([course,name,price,tags,mods],i)=>({id:'m'+i, course, name, price, tags, mods}));
+const COURSES = [...new Set(M.map(x=>x.course))];
+const DIET = {v:'Vegetarian', vg:'Vegan', gf:'Gluten-free'};
+const tab = store('menu.tab', []);
+const table = store('menu.table', 'T-'+(4+Math.floor(Math.random()*9)));
+$('#table').textContent = 'Table '+table.get();
+const view = $('#view');
+let filters = new Set();
+
+const total = () => tab.get().reduce((a,x)=>a+x.price*x.q,0);
+function badge(){ const n = tab.get().reduce((a,x)=>a+x.q,0);
+  $('#tabBtn').textContent = n? 'Tab · '+n+' · '+fmt.money(total()) : 'Tab'; }
+function menu(){
+  fill($('#diet'), Object.entries(DIET).map(([k,l])=>h('button.sm'+(filters.has(k)?' p':''),
+    {onclick:()=>{ filters.has(k)? filters.delete(k):filters.add(k); menu(); }}, l)));
+  const show = M.filter(x=>[...filters].every(f=>x.tags.includes(f)));
+  fill(view, h('div.col', COURSES.map(c=>{
+    const items = show.filter(x=>x.course===c);
+    if(!items.length) return null;
+    return h('div.pane', h('header',c, h('span.spacer'), h('span.tag',items.length+' items')),
+      h('ul.list', items.map(x=>h('li',{style:{cursor:'pointer'},onclick:()=>order(x)},
+        h('div',{style:{minWidth:0}}, h('div.b',x.name),
+          h('div.row',{style:{gap:'5px',marginTop:'3px'}},
+            x.tags.map(t=>h('span.tag',DIET[t])),
+            x.mods.length? h('span.small.muted',x.mods.length+' options'):null)),
+        h('span.spacer'), h('span.b.num',fmt.money(x.price))))));
+  })));
+}
+function order(x){
+  const q = h('input',{type:'number',value:1,min:1,max:9});
+  const mod = x.mods.length? h('select',[h('option',{value:''},'No preference'),
+    ...x.mods.map(m=>h('option',m))]) : null;
+  const note = h('input',{placeholder:'Anything the kitchen should know?'});
+  modal(x.name, h('div',
+    h('div.row',{style:{gap:'6px',marginBottom:'12px'}},
+      h('span.tag.acc',fmt.money(x.price)), h('span.tag',x.course), x.tags.map(t=>h('span.tag',DIET[t]))),
+    h('div.row', h('div.field',{style:{width:'90px'}},h('label','Qty'),q),
+      mod? h('div.field',{style:{flex:1}},h('label','Option'),mod):null),
+    h('div.field',h('label','Note'),note)),
+    () => { tab.set(v=>[...v,{id:uid(), name:x.name, price:x.price, q:+q.value||1,
+      mod: mod?.value||'', note: note.value.trim(), at:Date.now()}]);
+      badge(); toast('Added to the tab'); }, 'Add to tab');
+}
+function tabView(){
+  const t = tab.get();
+  fill(view, h('div.split.r',
+    h('div.pane',h('header','Your tab · table '+table.get()),
+      t.length? h('ul.list', t.map(x=>h('li',
+        h('span.tag',x.q+'×'),
+        h('div',{style:{minWidth:0}}, h('div.b',x.name),
+          h('div.small.muted',[x.mod,x.note].filter(Boolean).join(' · ')||'—')),
+        h('span.spacer'), h('span.b.num',fmt.money(x.price*x.q)),
+        h('button.g.sm',{onclick:()=>{tab.set(v=>v.filter(y=>y.id!==x.id));badge();tabView();}},'✕'))))
+        : h('div.empty','Nothing ordered yet.')),
+    h('div.col',
+      h('div.pane',h('header','Total'),h('div.body',
+        h('div.row',{style:{justifyContent:'space-between'}},h('span.small.muted','Items'),
+          h('span.num',t.reduce((a,x)=>a+x.q,0))),
+        h('div.row',{style:{justifyContent:'space-between',marginTop:'4px'}},h('span.b','Total'),
+          h('span.b.num',fmt.money(total()))),
+        h('button.p',{style:{width:'100%',marginTop:'12px'},disabled:!t.length,
+          onclick:async()=>{
+            try{ await submit('menu.order',{table:table.get(), items:t, total:total()});
+              toast('Order sent to the kitchen (recorded in @hanzo/base)'); }
+            catch(e){ toast('Order recorded locally'); }
+          }},'Send to kitchen'),
+        h('button',{style:{width:'100%',marginTop:'6px'},onclick:()=>{tab.set([]);badge();tabView();}},'Clear tab'))),
+      h('div.pane',h('header','Table'),h('div.body',
+        h('p.small.muted','In a real service this code comes from the QR sticker on the table. Here it is generated so the flow is complete.'),
+        h('div',{style:{fontFamily:'var(--mono)',fontSize:'28px',letterSpacing:'.12em',
+          textAlign:'center',padding:'14px 0'}}, table.get()),
+        h('button.g',{style:{width:'100%'},onclick:()=>{ table.set('T-'+(4+Math.floor(Math.random()*9)));
+          $('#table').textContent='Table '+table.get(); tabView(); }},'Scan another table'))))));
+}
+function split(){
+  const t = total();
+  const people = h('input',{type:'number',value:3,min:1,max:20});
+  const tip = h('input',{type:'range',min:0,max:25,step:1,value:10});
+  const out = h('div.body');
+  const calc = () => { const n = Math.max(1,+people.value), p = +tip.value;
+    const tipAmt = t*p/100, grand = t+tipAmt;
+    fill(out,
+      h('div.row',{style:{justifyContent:'space-between'}},h('span.small.muted','Bill'),h('span.num',fmt.money(t))),
+      h('div.row',{style:{justifyContent:'space-between',marginTop:'4px'}},
+        h('span.small.muted','Tip '+p+'%'),h('span.num',fmt.money(tipAmt))),
+      h('hr'),
+      h('div.row',{style:{justifyContent:'space-between'}},h('span.b','Total'),h('span.b.num',fmt.money(grand))),
+      h('div.row',{style:{justifyContent:'space-between',marginTop:'4px'}},
+        h('span.b','Each of '+n),h('span.b.num',{style:{fontSize:'20px'}},fmt.money(grand/n))),
+      h('div.grid',{style:{gridTemplateColumns:'repeat(auto-fill,minmax(96px,1fr))',gap:'8px',marginTop:'12px'}},
+        Array.from({length:n},(_,i)=>h('div.card.tight',{style:{textAlign:'center'}},
+          h('div.small.muted','Person '+(i+1)), h('div.b.num',fmt.money(grand/n)))))); };
+  people.oninput = tip.oninput = calc;
+  fill(view, h('div.split.r',
+    h('div.pane',h('header','Split the bill'),h('div.body',
+      h('div.field',h('label','How many people?'),people),
+      h('div.field',h('label','Tip'),tip)), out),
+    h('div.pane',h('header','What is on the tab'),
+      tab.get().length? h('ul.list', tab.get().map(x=>h('li',h('span.tag',x.q+'×'),
+        h('span.small',x.name), h('span.spacer'), h('span.num.small',fmt.money(x.price*x.q)))))
+        : h('div.empty','The tab is empty.'))));
+  calc();
+}
+route({'':()=>{badge();menu();}, 'tab':()=>{badge();tabView();}, 'split':()=>{badge();split();}, '*':()=>{badge();menu();}});
+</script>

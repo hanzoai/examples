@@ -1,0 +1,101 @@
+<!--hz {"title":"Releases","archetype":"changelog / release notes","creator":"web","desc":"Product changelog: entries grouped by version with typed changes, a filter by change type, RSS and JSON feed generation in the browser, keyboard search and a subscribe form on @hanzo/base.","nav":[["#/","Changelog"],["#/feeds","Feeds"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Releases</h1><span class="tag" id="n"></span>
+  <span class="spacer"></span>
+  <span id="types" class="row" style="gap:4px"></span>
+  <input id="q" placeholder="Search changes…" style="max-width:210px">
+</div>
+<div id="view"></div>
+<script>
+const {h,fill,$,store,fmt,esc,toast,submit,route,wire} = hz;
+const TYPES = {added:'ok', changed:'acc', fixed:'warn', removed:'bad', security:'bad'};
+const REL = [
+ ['2026.7.2','2026-07-21',[
+   ['added','Executable examples in the API reference — send a request from the docs page against your own project.'],
+   ['added','Release history now shows the digest of each manifest next to its id.'],
+   ['fixed','A deploy body just under the limit could still 413 when the manifest contained multibyte paths.'],
+   ['changed','The edge now purges on activation rather than on a timer, so a rollback is visible immediately.']]],
+ ['2026.7.1','2026-07-08',[
+   ['security','Reserved subdomain labels are now checked against the shared OAuth client’s redirect list at boot, and the service refuses to start if they diverge.'],
+   ['added','Per-project data space is provisioned on first publish, so a form on a new site works without setup.'],
+   ['fixed','Static export dropped server-only routes silently; it now prints every removed path.']]],
+ ['2026.6.4','2026-06-24',[
+   ['added','Wildcard certificates cover every subdomain of the platform apex.'],
+   ['changed','Cold start reduced from about nine hundred to about one hundred and twenty milliseconds by moving boot work off the request path.'],
+   ['removed','The legacy build-server deploy path has been retired. Publishing is a manifest upload.']]],
+ ['2026.6.1','2026-06-03',[
+   ['added','Content-addressed releases. A release id is the digest of its file manifest.'],
+   ['added','Activation is atomic: readers see one whole release or the other.'],
+   ['changed','Rollback is now activating an earlier release id — no rebuild, no redeploy.']]],
+ ['2026.5.2','2026-05-19',[
+   ['added','Analytics and support chat are injected at publish time from the shared runtime host.'],
+   ['fixed','A viewport meta tag emitted before the doctype put pages into quirks mode.']]],
+];
+const view = $('#view');
+let filter='all', q='';
+const all = () => REL.flatMap(([v,d,cs])=>cs.map(([t,body])=>({v,d,t,body})));
+
+function typesBar(){ fill($('#types'), ['all',...Object.keys(TYPES)].map(t=>
+  h('button.sm'+(filter===t?' p':''),{onclick:()=>{filter=t;list();}},t))); }
+function list(){
+  const rels = REL.map(([v,d,cs])=>[v,d,cs.filter(([t,b])=>
+    (filter==='all'||t===filter) && (!q || (t+' '+b).toLowerCase().includes(q)))])
+    .filter(([,,cs])=>cs.length);
+  $('#n').textContent = rels.reduce((a,[,,cs])=>a+cs.length,0)+' changes in '+rels.length+' releases';
+  fill(view, h('div.split.r',
+    h('div.col', rels.length? rels.map(([v,d,cs])=>h('div.pane',
+      h('header', h('span.mono',v), h('span.spacer'), h('span.small.muted',
+        new Date(d).toLocaleDateString('en-US',{day:'numeric',month:'long',year:'numeric'})),
+        h('span.tag',cs.length+' changes')),
+      h('ul.list', cs.map(([t,body])=>h('li',{style:{alignItems:'flex-start'}},
+        h('span.tag '+TYPES[t],{style:{flex:'none',minWidth:'74px'}},t),
+        h('span.small',body))))))
+      : h('div.empty','No changes match this filter.')),
+    h('div.col',
+      h('div.pane',h('header','Subscribe'),h('div.body',(()=>{
+        const f = h('form',h('div.field',h('label','Email'),
+          h('input',{name:'email',type:'email',required:true,placeholder:'you@example.invalid'})),
+          h('button.p',{type:'submit',style:{width:'100%'}},'Notify me of releases'));
+        return wire(f,'releases.subscribe'); })(),
+        h('p.hz-note','Recorded in @hanzo/base. No notification is ever sent from this demonstration.'))),
+      h('div.pane',h('header','Releases'),h('ul.list', REL.map(([v,d,cs])=>h('li',
+        h('span.mono.small.b',v), h('span.spacer'),
+        h('span.small.muted',fmt.date(d)), h('span.tag',cs.length))))),
+      h('div.pane',h('header','Change types'),h('ul.list', Object.entries(TYPES).map(([t,c])=>h('li',
+        h('span.tag '+c,t), h('span.small.muted',
+          {added:'New capability',changed:'Behaviour differs',fixed:'Defect resolved',
+           removed:'Capability withdrawn',security:'Security-relevant'}[t]),
+        h('span.spacer'), h('span.tag', all().filter(x=>x.t===t).length))))))));
+}
+function feeds(){
+  const site = 'https://'+location.host;
+  const rss = ['<?xml version="1.0" encoding="UTF-8"?>','<rss version="2.0"><channel>',
+    '<title>Releases</title>','<link>'+site+'</link>',
+    '<description>Product changelog — an official Hanzo example</description>',
+    ...REL.map(([v,d,cs])=>['<item>','<title>'+v+'</title>',
+      '<link>'+site+'/#/'+v+'</link>','<pubDate>'+new Date(d).toUTCString()+'</pubDate>',
+      '<description>'+esc(cs.map(([t,b])=>t.toUpperCase()+': '+b).join(' — '))+'</description>','</item>'].join('')),
+    '</channel></rss>'].join('\n');
+  const json = JSON.stringify({version:'https://jsonfeed.org/version/1.1', title:'Releases',
+    home_page_url:site, items: REL.map(([v,d,cs])=>({id:v, url:site+'/#/'+v, title:v,
+      date_published:new Date(d).toISOString(),
+      content_text: cs.map(([t,b])=>t+': '+b).join('\n')}))}, null, 2);
+  const md = REL.map(([v,d,cs])=>'## '+v+' — '+d+'\n\n'+
+    cs.map(([t,b])=>'- **'+t+'** '+b).join('\n')).join('\n\n');
+  const box = (title, text, name, type) => h('div.pane', h('header',title, h('span.spacer'),
+      h('button.sm',{onclick:()=>{navigator.clipboard?.writeText(text);toast('Copied');}},'Copy'),
+      h('button.sm',{onclick:()=>{ h('a',{download:name,href:URL.createObjectURL(new Blob([text],{type}))}).click();
+        submit('releases.feed',{format:name.split('.').pop()}).catch(()=>{}); }},'Download')),
+    h('div.body',h('pre',{style:{maxHeight:'280px',overflow:'auto'}},text)));
+  fill(view, h('div.col',
+    h('p','Feeds are generated in the browser from the same changelog data the page renders, so they can never disagree with it.'),
+    box('RSS 2.0','', 'releases.xml','application/rss+xml'),
+    box('JSON Feed 1.1', json, 'releases.json','application/json'),
+    box('Markdown', md, 'CHANGELOG.md','text/markdown')));
+  // Fill the RSS box after construction so the XML is not escaped twice.
+  $$('pre')[0].textContent = rss;
+}
+const $$ = s => [...document.querySelectorAll(s)];
+$('#q').oninput = e => { q = e.target.value.toLowerCase(); if(!location.hash.includes('feeds')) list(); };
+route({'':()=>{typesBar();list();}, 'feeds':()=>{typesBar();feeds();}, '*':()=>{typesBar();list();}});
+</script>

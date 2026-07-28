@@ -1,0 +1,91 @@
+<!--hz {"title":"Console Admin","archetype":"admin / CRUD","creator":"apps","desc":"Back-office admin: user CRUD with roles and status, bulk actions, role matrix and an append-only audit trail.","nav":[["#/","Users"],["#/roles","Roles"],["#/audit","Audit"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Console admin</h1><span class="tag" id="kpi"></span>
+  <span class="spacer"></span><button class="p" id="new">+ Invite user</button>
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:16px">Every record here is synthetic. Names are generated placeholders; no real account, email address or organisation is represented.</p>
+<script>
+const {h,fill,$,$$,store,rng,range,pick,uid,fmt,avatar,grid,modal,toast,submit,route,donut} = hz;
+const r = rng(31337);
+const ROLES = ['owner','admin','developer','billing','viewer'];
+const CAPS = ['Read projects','Deploy sites','Manage domains','Invite members','Change plan','Read audit log','Delete org'];
+const MATRIX = { owner:[1,1,1,1,1,1,1], admin:[1,1,1,1,0,1,0], developer:[1,1,1,0,0,0,0], billing:[1,0,0,0,1,1,0], viewer:[1,0,0,0,0,0,0] };
+const FIRST=['Ada','Grace','Ken','Barbara','Linus','Radia','Alan','Karen','Bjarne','Anita','Frances','Donald'];
+const LAST=['L.','H.','T.','L.','T.','P.','K.','S.','S.','B.','A.','K.'];
+const seed = range(24, i => ({
+  id: uid(), name: FIRST[i%12]+' '+LAST[(i*5)%12], email: 'user'+(100+i)+'@example.invalid',
+  role: i===0?'owner':pick(r,ROLES), status: r()<0.12?'suspended':r()<0.22?'invited':'active',
+  seen: Date.now()-Math.round(r()*40)*864e5, mfa: r()<0.65,
+}));
+const db = store('admin.users', seed);
+const audit = store('admin.audit', []);
+const view = $('#view');
+const sel = new Set();
+const log = (a,t) => audit.set(v=>[{at:Date.now(),actor:'you@example.invalid',action:a,target:t},...v].slice(0,200));
+
+function kpi(){ const d=db.get();
+  $('#kpi').textContent = d.length+' users · '+d.filter(x=>x.status==='active').length+' active · '
+    + d.filter(x=>!x.mfa).length+' without MFA'; }
+function users(){
+  const bulk = h('div.row',{style:{gap:'6px'}},
+    h('span.spacer'),
+    h('button.sm',{onclick:()=>bulkSet('active')},'Activate'),
+    h('button.sm',{onclick:()=>bulkSet('suspended')},'Suspend'),
+    h('button.sm',{onclick:()=>{ if(!sel.size) return toast('Select rows first');
+      db.set(v=>v.filter(x=>!sel.has(x.id))); log('user.delete', sel.size+' users'); sel.clear(); kpi(); users(); }},'Delete'));
+  fill(view, h('div.pane', grid([
+    {k:'id',t:'',w:'30px',cell:x=>h('input',{type:'checkbox',checked:sel.has(x.id),
+      onclick:e=>{e.stopPropagation(); e.target.checked?sel.add(x.id):sel.delete(x.id);}})},
+    {k:'name',t:'User',cell:x=>h('div.row',{style:{gap:'9px'}},avatar(x.name,28),
+      h('div',h('div.b',x.name),h('div.small.muted',x.email)))},
+    {k:'role',t:'Role',cell:x=>h('span.tag'+(x.role==='owner'?' acc':''),x.role)},
+    {k:'status',t:'Status',cell:x=>h('span.tag '+({active:'ok',suspended:'bad',invited:'warn'}[x.status]),x.status)},
+    {k:'mfa',t:'MFA',cell:x=>x.mfa?h('span.tag.ok','on'):h('span.tag.warn','off')},
+    {k:'seen',t:'Last seen',num:true,cell:x=>h('span.small.muted',fmt.ago(x.seen))},
+  ], db.get(), {onRow:edit, placeholder:'Search users…', actions:bulk})));
+}
+function bulkSet(s){ if(!sel.size) return toast('Select rows first');
+  db.set(v=>v.map(x=>sel.has(x.id)?{...x,status:s}:x)); log('user.status='+s, sel.size+' users'); sel.clear(); kpi(); users(); }
+function roles(){
+  const d = db.get();
+  fill(view, h('div.split.r',
+    h('div.pane',h('header','Role capability matrix'),h('div.scroll-x',h('table',
+      h('thead',h('tr',h('th','Capability'),...ROLES.map(r0=>h('th',r0)))),
+      h('tbody',CAPS.map((c,ci)=>h('tr',h('td',c),...ROLES.map(r0=>
+        h('td',MATRIX[r0][ci]?h('span.tag.ok','yes'):h('span.muted','—'))))))))),
+    h('div.pane',h('header','Members per role'),h('div.body',
+      donut(ROLES.map(r0=>({k:r0,v:d.filter(x=>x.role===r0).length})).filter(x=>x.v))))));
+}
+function auditView(){
+  const a = audit.get();
+  fill(view, h('div.pane',h('header','Audit trail'),
+    a.length? h('table',h('thead',h('tr',h('th','When'),h('th','Actor'),h('th','Action'),h('th','Target'))),
+      h('tbody',a.map(x=>h('tr',h('td.small.muted',fmt.ago(x.at)),h('td.small.mono',x.actor),
+        h('td',h('span.tag.acc',x.action)),h('td.small',x.target)))))
+      : h('div.empty','No administrative actions recorded in this session yet.')));
+}
+function edit(x){
+  const n=h('input',{value:x.name}), e=h('input',{value:x.email,type:'email'});
+  const ro=h('select',ROLES.map(v=>h('option',{selected:v===x.role},v)));
+  const st=h('select',['active','invited','suspended'].map(v=>h('option',{selected:v===x.status},v)));
+  const mfa=h('input',{type:'checkbox',checked:x.mfa});
+  modal('Edit '+x.name, h('div',
+    h('div.field',h('label','Name'),n), h('div.field',h('label','Email'),e),
+    h('div.row',h('div.field',{style:{flex:1}},h('label','Role'),ro),h('div.field',{style:{flex:1}},h('label','Status'),st)),
+    h('label.inline',{style:{gap:'8px'}},mfa,h('span','Multi-factor authentication enabled'))),
+    () => { db.set(v=>v.map(y=>y.id===x.id?{...y,name:n.value,email:e.value,role:ro.value,status:st.value,mfa:mfa.checked}:y));
+      log('user.update', e.value); kpi(); users(); });
+}
+$('#new').onclick = () => {
+  const e=h('input',{type:'email',placeholder:'name@example.invalid'});
+  const ro=h('select',ROLES.map(v=>h('option',{selected:v==='developer'},v)));
+  modal('Invite user', h('div',h('div.field',h('label','Email'),e),h('div.field',h('label','Role'),ro)),
+    async () => { if(!e.value.trim()) return;
+      const u={id:uid(),name:e.value.split('@')[0],email:e.value,role:ro.value,status:'invited',seen:Date.now(),mfa:false};
+      db.set(v=>[u,...v]); log('user.invite',e.value); kpi(); users();
+      try{ await submit('admin.invite',{email:e.value,role:ro.value}); toast('Invite recorded in @hanzo/base'); }
+      catch(err){ toast('Invite recorded locally'); } },'Send invite');
+};
+route({'':users,'roles':roles,'audit':auditView,'*':users}); kpi();
+</script>

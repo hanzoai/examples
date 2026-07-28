@@ -1,0 +1,104 @@
+<!--hz {"title":"Relay CRM","archetype":"CRM","creator":"apps","desc":"Sales CRM: deal pipeline by stage, weighted forecast, account list and an activity timeline. New notes persist to @hanzo/base.","nav":[["#/","Pipeline"],["#/accounts","Accounts"],["#/forecast","Forecast"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Relay CRM</h1><span class="tag acc" id="sum"></span>
+  <span class="spacer"></span><button class="p" id="new">+ Deal</button>
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:16px">Companies, contacts and amounts are synthetic demo data generated from a fixed seed.</p>
+<script>
+const {h,fill,$,store,rng,range,pick,uid,fmt,avatar,grid,bars,donut,modal,toast,submit,route} = hz;
+const r = rng(4242);
+const STAGES = ['Qualify','Discovery','Proposal','Negotiation','Closed won'];
+const PROB = [0.15,0.35,0.55,0.78,1];
+const CO = ['Northwind','Acme Robotics','Belmont Labs','Cedarline','Dovetail','Everpine','Fairmount','Glasswing','Harbourview','Ironleaf','Junipex','Kestrel Data'];
+const OWNERS = ['Ada L','Grace H','Ken T','Barbara L'];
+const seed = range(22, i => ({
+  id: uid(), co: CO[i % CO.length] + (i >= CO.length ? ' II' : ''),
+  stage: STAGES[Math.floor(r()*5)], amount: Math.round((8+r()*180))*1000,
+  owner: pick(r, OWNERS), contact: pick(r,['Head of Eng','VP Data','CTO','Director, Ops']),
+  age: Math.round(r()*90)+2, notes: [],
+}));
+const db = store('crm', seed);
+const view = $('#view');
+
+function totals(){
+  const d = db.get();
+  const w = d.reduce((a,x)=> a + x.amount*PROB[STAGES.indexOf(x.stage)], 0);
+  $('#sum').textContent = d.length+' deals · '+fmt.money(w)+' weighted';
+}
+function pipeline(){
+  const d = db.get();
+  fill(view, h('div.scroll-x', h('div',{style:{display:'flex',gap:'12px',minWidth:'min-content'}},
+    STAGES.map((s,si) => {
+      const mine = d.filter(x=>x.stage===s);
+      const col = h('div.col',{style:{gap:'8px',padding:'10px',minHeight:'80px'}},
+        mine.map(x => h('div.card.tight',{style:{cursor:'pointer'},onclick:()=>open(x)},
+          h('div.b',x.co),
+          h('div.row',{style:{gap:'6px',marginTop:'6px'}},
+            h('span.small.num.b',fmt.money(x.amount)), h('span.spacer'),
+            h('span.small.muted',x.age+'d')),
+          h('div.row',{style:{gap:'6px',marginTop:'8px'}}, avatar(x.owner,22),
+            h('span.small.muted',x.contact)))),
+        !mine.length && h('div.empty',{style:{padding:'16px'}},'—'));
+      col.addEventListener('dragover',e=>e.preventDefault());
+      return h('div.pane',{style:{width:'250px',flex:'0 0 250px'}},
+        h('header', s, h('span.spacer'),
+          h('span.tag', fmt.money(mine.reduce((a,x)=>a+x.amount,0)))), col);
+    }))));
+}
+function accounts(){
+  const g = grid([
+    {k:'co',t:'Account',cell:x=>h('div.row',{style:{gap:'8px'}},avatar(x.co,24),h('span.b',x.co))},
+    {k:'contact',t:'Primary contact'},
+    {k:'stage',t:'Stage',cell:x=>h('span.tag'+(x.stage==='Closed won'?' ok':''),x.stage)},
+    {k:'amount',t:'Value',num:true,cell:x=>fmt.money(x.amount)},
+    {k:'owner',t:'Owner'},
+    {k:'age',t:'Age',num:true,cell:x=>x.age+' d'},
+  ], db.get(), {onRow:open, placeholder:'Search accounts…'});
+  fill(view, h('div.pane', g));
+}
+function forecast(){
+  const d = db.get();
+  const byStage = STAGES.map(s=>({k:s, v:d.filter(x=>x.stage===s).reduce((a,x)=>a+x.amount,0)}));
+  const byOwner = OWNERS.map(o=>({k:o, v:d.filter(x=>x.owner===o).reduce((a,x)=>a+x.amount,0)}));
+  fill(view, h('div.split',
+    h('div.pane', h('header','Value by stage'), h('div.body',
+      bars(byStage.map(x=>({...x,f:fmt.money(x.v)}))))),
+    h('div.pane', h('header','Weighted by owner'), h('div.body',
+      donut(byOwner), h('table',h('thead',h('tr',h('th','Owner'),h('th','Pipeline'),h('th','Weighted'))),
+        h('tbody', byOwner.map(o=>{
+          const w = d.filter(x=>x.owner===o.k).reduce((a,x)=>a+x.amount*PROB[STAGES.indexOf(x.stage)],0);
+          return h('tr',h('td',o.k),h('td.num',fmt.money(o.v)),h('td.num',fmt.money(w)));
+        })))))));
+}
+function open(x){
+  const note = h('textarea',{placeholder:'Log a call, meeting or email…'});
+  const st = h('select', STAGES.map(s=>h('option',{selected:s===x.stage},s)));
+  modal(x.co, h('div',
+    h('div.row',{style:{marginBottom:'10px'}},
+      h('span.tag.acc',fmt.money(x.amount)), h('span.tag',x.owner), h('span.tag',x.contact)),
+    h('div.field',h('label','Stage'),st),
+    h('div.field',h('label','Activity'),note),
+    h('ul.list',{style:{border:'1px solid var(--line)',borderRadius:'8px'}},
+      x.notes.length? x.notes.map(n=>h('li',h('div',h('div.small',n.t),h('div.small.muted',fmt.ago(n.at)))))
+        : h('li',h('span.muted.small','No activity logged yet')))),
+    async () => {
+      const notes = note.value.trim()? [{t:note.value.trim(),at:Date.now()},...x.notes] : x.notes;
+      db.set(v=>v.map(y=>y.id===x.id?{...y,stage:st.value,notes}:y));
+      totals(); render();
+      if(note.value.trim()){ try{ await submit('crm.activity',{deal:x.co,note:note.value.trim()}); toast('Logged to @hanzo/base'); }catch(e){ toast('Logged locally'); } }
+    });
+}
+$('#new').onclick = () => {
+  const co = h('input',{placeholder:'Company'}), am = h('input',{type:'number',value:25000});
+  modal('New deal', h('div', h('div.field',h('label','Account'),co), h('div.field',h('label','Amount (USD)'),am)),
+    async () => { if(!co.value.trim()) return;
+      const d = {id:uid(),co:co.value.trim(),stage:'Qualify',amount:+am.value||0,owner:OWNERS[0],contact:'New contact',age:0,notes:[]};
+      db.set(v=>[d,...v]); totals(); render();
+      try{ await submit('crm.deal', d); toast('Deal saved to @hanzo/base'); }catch(e){ toast('Deal added locally'); } }, 'Create');
+};
+let render = pipeline;
+route({'':()=>{render=pipeline;pipeline();}, 'accounts':()=>{render=accounts;accounts();},
+       'forecast':()=>{render=forecast;forecast();}, '*':()=>{render=pipeline;pipeline();}});
+totals();
+</script>

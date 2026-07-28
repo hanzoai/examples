@@ -1,0 +1,104 @@
+<!--hz {"title":"Journal","archetype":"blog / CMS","creator":"web","desc":"Blog with an editing surface: post list, reading view with estimated read time, tag filter, live markdown-ish editor with preview, draft/publish state and a newsletter form on @hanzo/base.","nav":[["#/","Posts"],["#/write","Write"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Journal</h1><span class="tag" id="n"></span>
+  <span class="spacer"></span><span id="tags" class="row" style="gap:5px"></span>
+</div>
+<div id="view"></div>
+<script>
+const {h,fill,$,store,rng,uid,fmt,avatar,toast,submit,route,wire,esc} = hz;
+const r = rng(1010);
+const POSTS = [
+ ['Deploys should be boring','engineering', 3,
+  "We replaced a build server with a manifest.\n\nA deploy is now a list of paths and their contents. There is no queue, no worker pool and no build cache to invalidate. The interesting consequence is not speed — it is that the same input always produces the same output, which makes a deploy a value rather than an event.\n\n## What changed\n\nThe id of a release is the digest of its manifest. Publishing the same bytes twice does not create a second release; it returns the first one. Activation is a pointer flip.\n\n## What it bought us\n\nRollback stopped being a procedure. It is activating an earlier id, which takes as long as writing one row."],
+ ['On reserved subdomains','security', 4,
+  "A list of names you cannot have is a security control, not a branding decision.\n\nIf a user can publish a page at a label that an OAuth client already trusts as a redirect target, that user can receive other people's authorisation codes. The list therefore has to be a superset of every redirect label the shared client registers.\n\n## The uncomfortable part\n\nThe list must be maintained in lock-step with identity configuration, and the only durable way to do that is a test that reads both."],
+ ['A raymarcher in sixty lines','graphics', 5,
+  "No meshes. No textures. No asset downloads.\n\nA signed distance field describes a surface as a function: given a point, how far is the nearest surface? Rendering is then walking a ray forward by exactly that distance until it is small enough to call a hit.\n\n## Why it is nice for the web\n\nThe entire scene is source code. There is nothing to download, so the page is interactive as soon as the shader compiles."],
+ ['The lockfile that never named your machine','tooling', 3,
+  "Optional dependencies are resolved from the lockfile, so a lockfile committed on one architecture never mentions the native binary another architecture needs.\n\nThe failure looks like a missing module deep inside a bundler. The fix is to install the sibling package whose name is the parent plus the host triple."],
+ ['Small dashboards','design', 2,
+  "Most dashboards would be improved by deleting four of their five charts.\n\nA number tells you the state. A sparkline tells you the direction. Everything else is usually there because it was easy to add, not because someone reads it."],
+];
+const seed = POSTS.map(([t,tag,min,body],i)=>({
+  id:uid(), t, tag, min, body, by:'Hanzo Examples — Web Studio', state:'published',
+  at: Date.now()-(i*6+2)*864e5, hue:[210,268,150,32,340][i%5],
+}));
+const db = store('journal', seed);
+const view = $('#view');
+let tag='All';
+
+const md = s => esc(s).replace(/^## (.+)$/gm,'<h2>$1</h2>').replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')
+  .replace(/`(.+?)`/g,'<code>$1</code>').split(/\n\n+/).map(p=>p.startsWith('<h2')?p:'<p>'+p+'</p>').join('');
+const words = s => s.trim().split(/\s+/).length;
+
+function tagbar(){
+  const all = ['All',...new Set(db.get().map(p=>p.tag))];
+  fill($('#tags'), all.map(t=>h('button.sm'+(t===tag?' p':''),{onclick:()=>{tag=t;list();}},t)));
+}
+function list(){
+  const d = db.get().filter(p=>tag==='All'||p.tag===tag);
+  $('#n').textContent = d.length+' posts';
+  fill(view, h('div.split.r',
+    h('div.col', d.length? d.map(p=>h('div.card',{style:{cursor:'pointer'},onclick:()=>{location.hash='#/p/'+p.id;}},
+      h('div.row',{style:{gap:'8px'}},
+        h('span',{style:{width:'6px',height:'34px',borderRadius:'3px',flex:'none',background:`hsl(${p.hue} 60% 52%)`}}),
+        h('div',{style:{minWidth:0}}, h('h3',{style:{margin:0}},p.t),
+          h('div.small.muted', fmt.date(p.at)+' · '+Math.max(1,Math.round(words(p.body)/200))+' min read · #'+p.tag)),
+        h('span.spacer'), p.state==='draft'?h('span.tag.warn','draft'):h('span.tag.ok','published')),
+      h('p.small',{style:{margin:'10px 0 0'}}, p.body.replace(/#/g,'').slice(0,150)+'…')))
+      : h('div.empty','No posts with this tag.')),
+    h('div.col',
+      h('div.pane',h('header','Newsletter'),h('div.body', (()=>{
+        const f = h('form', h('div.field',h('label','Get new posts by email'),
+          h('input',{name:'email',type:'email',required:true,placeholder:'you@example.invalid'})),
+          h('button.p',{type:'submit',style:{width:'100%'}},'Subscribe'));
+        return wire(f,'journal.subscribe'); })(),
+        h('p.hz-note','Subscriptions are stored in @hanzo/base. No email is ever sent from this demonstration.'))),
+      h('div.pane',h('header','Archive'),h('ul.list', db.get().map(p=>
+        h('li',{style:{cursor:'pointer'},onclick:()=>{location.hash='#/p/'+p.id;}},
+          h('span.small.muted',{style:{width:'54px'}},fmt.date(p.at)), h('span.small.trunc',p.t))))))));
+}
+function read(id){
+  const p = db.get().find(x=>x.id===id); if(!p) return list();
+  fill(view, h('div.split.r',
+    h('article.pane',h('div.body',
+      h('div.small.muted',fmt.date(p.at)+' · #'+p.tag+' · '+Math.max(1,Math.round(words(p.body)/200))+' min read'),
+      h('h1',p.t),
+      h('div.row',{style:{gap:'9px',margin:'0 0 16px'}}, avatar('Hanzo Examples',28),
+        h('div',h('div.small.b',p.by),h('div.small.muted','Official first-party Hanzo example account'))),
+      h('div',{html:md(p.body)}),
+      h('hr'), h('a.btn',{href:'#/'},'‹ All posts'))),
+    h('div.pane',h('header','More posts'),h('ul.list', db.get().filter(x=>x.id!==p.id).slice(0,4).map(x=>
+      h('li',{style:{cursor:'pointer'},onclick:()=>{location.hash='#/p/'+x.id;}},
+        h('div',h('div.small.b',x.t),h('div.small.muted','#'+x.tag))))))));
+  scrollTo({top:0});
+}
+function write(){
+  const t = h('input',{placeholder:'Post title'}), tg = h('input',{placeholder:'tag',value:'engineering'});
+  const b = h('textarea',{style:{minHeight:'320px',fontFamily:'var(--mono)',fontSize:'13px'},
+    placeholder:'Write here. Use ## for a heading, **bold**, `code`.'});
+  const prev = h('div.body');
+  const sync = () => fill(prev, h('div', h('h1',t.value||'Untitled'),
+    h('div.small.muted', Math.max(1,Math.round(words(b.value||' ')/200))+' min read · '+words(b.value||'')+' words'),
+    h('div',{html:md(b.value||'_Nothing yet._')})));
+  b.oninput = t.oninput = sync; sync();
+  const save = (state) => async () => {
+    if(!t.value.trim()) return toast('A title is required');
+    const p = {id:uid(),t:t.value.trim(),tag:tg.value.trim()||'notes',body:b.value,by:'You',state,
+      at:Date.now(),hue:Math.round(Math.random()*360)};
+    db.set(v=>[p,...v]); tagbar();
+    try{ await submit('journal.post',{title:p.t,tag:p.tag,state}); toast('Saved to @hanzo/base'); }
+    catch(e){ toast('Saved locally'); }
+    location.hash = state==='draft' ? '#/' : '#/p/'+p.id;
+  };
+  fill(view, h('div.split.r',
+    h('div.pane',h('header','Editor'),h('div.body',
+      h('div.row',h('div.field',{style:{flex:2}},h('label','Title'),t),
+        h('div.field',{style:{flex:1}},h('label','Tag'),tg)),
+      h('div.field',h('label','Body'),b),
+      h('div.row', h('button',{onclick:save('draft')},'Save draft'),
+        h('button.p',{onclick:save('published')},'Publish')))),
+    h('div.pane',h('header','Live preview'),prev)));
+}
+route({'':()=>{tagbar();list();}, 'write':()=>{tagbar();write();}, 'p/:id':a=>{tagbar();read(a.id);}, '*':()=>{tagbar();list();}});
+</script>

@@ -1,0 +1,97 @@
+<!--hz {"title":"API Reference","archetype":"docs site / API reference","creator":"web","desc":"API reference with a working try-it console: endpoint list, parameter tables, request builder, real fetch against this site's own Base endpoint, and generated curl/JS snippets.","nav":[["#/","Reference"]]} -->
+<div class="split">
+  <div class="pane"><header>Endpoints</header><ul class="list" id="nav"></ul>
+    <div class="body"><p class="hz-note" style="margin:0">Endpoints marked <span class="tag ok">live</span> really execute against this site's own origin. The rest are documentation only.</p></div></div>
+  <div id="view"></div>
+</div>
+<script>
+const {h,fill,$,fmt,route,toast,esc} = hz;
+const API = [
+ {id:'deploy', m:'POST', p:'/v1/sites/deploy', live:false, sum:'Publish a file manifest as a site',
+  desc:'Creates a release from the supplied files and activates it. The response carries the live URL, the deployment id and the stored file list.',
+  params:[['slug','string','no','Subdomain label. Generated from name when omitted. Reserved labels are refused.'],
+    ['name','string','no','Human-readable site name.'],
+    ['files','array','yes','Objects of {path, content}. Up to 5,000 entries; the whole body is capped at 4 MiB.']],
+  body:{slug:'my-app', name:'My app', files:[{path:'index.html', content:'<h1>hello</h1>'}]},
+  resp:{url:'https://my-app.hanzo.app', slug:'my-app', deploymentId:'dep_…', files:['index.html'], status:'live'}},
+ {id:'sites', m:'GET', p:'/v1/sites', live:false, sum:'List the org’s live sites',
+  desc:'Returns every project whose status is live, with its pretty URL and last update time.',
+  params:[], resp:[{slug:'my-app', url:'https://my-app.hanzo.app', name:'My app', status:'live', updatedAt:1785209262}]},
+ {id:'activate', m:'POST', p:'/v1/sites/{slug}/releases/{release}/activate', live:false, sum:'Activate a release (rollback)',
+  desc:'Flips the serving pointer to an existing release. Atomic: readers see one whole release or the other. This is how a rollback is performed.',
+  params:[['slug','path','yes','The site.'],['release','path','yes','Content-addressed release id, e.g. rel_9c1f2.']],
+  resp:{slug:'my-app', release:'rel_9c1f2', status:'live'}},
+ {id:'records', m:'POST', p:'/v1/base/collections/submissions/records', live:true, sum:'Create a data record',
+  desc:'The data plane every published site gets. Served on the site’s OWN origin, so an anonymous page can create a record with no credential. Create is open; reads are restricted to the space owner.',
+  params:[['form','string','no','Namespace for the submission, up to 128 characters.'],
+    ['data','object','no','Arbitrary JSON payload, up to 1 MiB.']],
+  body:{form:'apiref.demo', data:{hello:'world'}},
+  resp:{id:'…', collectionName:'submissions', form:'apiref.demo', data:{hello:'world'}}},
+ {id:'health', m:'GET', p:'/v1/base/health', live:true, sum:'Data plane health',
+  desc:'Always answers, with or without a configured data space. Useful as a liveness probe from a published page.',
+  params:[], resp:{message:'API is healthy.', code:200, data:{}}},
+ {id:'manifest', m:'GET', p:'/.well-known/hanzo-example.json', live:true, sum:'First-party example manifest',
+  desc:'Machine-readable marker every official Hanzo example publishes: who authored it, that it is first-party and seeded, and that its data is synthetic.',
+  params:[], resp:{official:true, seeded:true, firstParty:true}},
+];
+const view = $('#view');
+function nav(){
+  const at = location.hash.replace(/^#\/?/,'') || API[0].id;
+  fill($('#nav'), API.map(e=>h('li',{style:{cursor:'pointer',background:e.id===at?'var(--bg3)':''},
+    onclick:()=>{location.hash='#/'+e.id;}},
+    h('span.tag'+(e.m==='GET'?'':'.acc'),e.m),
+    h('div',{style:{minWidth:0}},h('div.small.b.trunc',e.sum),h('div.mono.small.muted.trunc',e.p)),
+    e.live? h('span.tag.ok','live'):null)));
+}
+function snippet(e, body){
+  const url = e.p.replace('{slug}','my-app').replace('{release}','rel_9c1f2');
+  const curl = 'curl -X '+e.m+' https://'+location.host+url +
+    (body? " \\\n  -H 'Content-Type: application/json' \\\n  -d '"+JSON.stringify(body)+"'" : '');
+  const js = "await fetch('"+url+"'"+(body? ", {\n  method: '"+e.m+"',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify("+JSON.stringify(body,null,2).replace(/\n/g,'\n  ')+")\n}" : '')+");";
+  return [curl, js];
+}
+function page(id){
+  const e = API.find(x=>x.id===id) || API[0];
+  const bodyBox = e.body ? h('textarea',{style:{minHeight:'110px',fontFamily:'var(--mono)',fontSize:'12px'},
+    value: JSON.stringify(e.body,null,2)}) : null;
+  const out = h('pre',{style:{maxHeight:'240px',overflow:'auto'}}, '// press Send');
+  const [curl, js] = snippet(e, e.body);
+  const send = async () => {
+    if(!e.live){ out.textContent = '// Not executable from this page.\n'+
+      '// This endpoint needs an authenticated org context; the reference documents it rather than pretending to call it.'; return; }
+    const t = performance.now();
+    try {
+      const opt = {method:e.m};
+      if(bodyBox){ opt.headers={'Content-Type':'application/json'}; opt.body = bodyBox.value; }
+      const r = await fetch(e.p, opt);
+      const text = await r.text();
+      let pretty = text; try { pretty = JSON.stringify(JSON.parse(text),null,2); } catch(_){}
+      out.textContent = '// '+r.status+' '+r.statusText+'  ·  '+Math.round(performance.now()-t)+' ms\n'+pretty.slice(0,4000);
+      toast(r.ok? 'Request succeeded' : 'Request returned '+r.status);
+    } catch(err){ out.textContent = '// network error: '+err.message; }
+  };
+  fill(view, h('div.col',
+    h('div.pane', h('header', h('span.tag'+(e.m==='GET'?'':'.acc'),e.m), h('span.mono',e.p),
+      h('span.spacer'), e.live? h('span.tag.ok','executable'):h('span.tag','documentation')),
+      h('div.body', h('h2',{style:{marginTop:0}},e.sum), h('p',e.desc),
+        e.params.length ? h('table',
+          h('thead',h('tr',h('th','Name'),h('th','Type'),h('th','Required'),h('th','Description'))),
+          h('tbody', e.params.map(([n,t,req,d])=>h('tr',
+            h('td.mono.small.b',n), h('td',h('span.tag',t)),
+            h('td', req==='yes'? h('span.tag.acc','required') : h('span.muted','optional')),
+            h('td.small',d))))) : h('p.small.muted','This endpoint takes no parameters.'))),
+    h('div.pane', h('header','Try it'),
+      h('div.body', bodyBox ? h('div.field',h('label','Request body'),bodyBox) : null,
+        h('div.row', h('button.p',{onclick:send},'Send request'),
+          h('button.g',{onclick:()=>{out.textContent='// press Send';}},'Clear')),
+        h('div',{style:{marginTop:'10px'}}, out))),
+    h('div.split',
+      h('div.pane',h('header','curl'),h('div.body',h('pre',curl),
+        h('button.sm',{style:{marginTop:'8px'},onclick:()=>{navigator.clipboard?.writeText(curl);toast('Copied');}},'Copy'))),
+      h('div.pane',h('header','JavaScript'),h('div.body',h('pre',js),
+        h('button.sm',{style:{marginTop:'8px'},onclick:()=>{navigator.clipboard?.writeText(js);toast('Copied');}},'Copy')))),
+    h('div.pane',h('header','Example response'),h('div.body',h('pre',JSON.stringify(e.resp,null,2))))));
+  nav(); scrollTo({top:0});
+}
+route({'':()=>page(API[0].id), ':id':a=>page(a.id), '*':()=>page(API[0].id)});
+</script>

@@ -1,0 +1,107 @@
+<!--hz {"title":"Streaks","archetype":"habit tracker","creator":"apps","desc":"Habit tracker: a 26-week contribution heatmap per habit, current and longest streak, weekday completion profile, goal targets and per-day notes stored in @hanzo/base.","nav":[["#/","Habits"],["#/stats","Statistics"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Streaks</h1><span class="tag" id="kpi"></span>
+  <span class="spacer"></span><button class="p" id="new">+ Habit</button>
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:16px">The seeded history is generated so the heatmap has something to show. Days you tick are yours: they persist in this browser and each tick is recorded in @hanzo/base.</p>
+<script>
+const {h,fill,$,store,rng,range,uid,fmt,bars,modal,toast,submit,route} = hz;
+const DAY = 864e5, WEEKS = 26, DAYS = WEEKS*7;
+const today = new Date(new Date().toDateString()).getTime();
+const key = t => new Date(t).toISOString().slice(0,10);
+const r = rng(7331);
+const SEED = [
+  ['Write for 30 minutes','#5b8cff',5, 0.62],
+  ['Move the body','#3ecf8e',6, 0.71],
+  ['No screens after 22:00','#8b5cf6',7, 0.45],
+  ['Read 10 pages','#f6b73c',4, 0.55],
+].map(([t,c,goal,p])=>({id:uid(), t, c, goal,
+  days: Object.fromEntries(range(DAYS, i=>{
+    const d = today - (DAYS-1-i)*DAY;
+    return r() < p*(0.6+0.6*i/DAYS) ? [key(d), 1] : null;
+  }).filter(Boolean))}));
+const db = store('streaks', SEED);
+const view = $('#view');
+
+function streak(hab){
+  let cur=0, best=0, run=0;
+  for(let i=0;i<DAYS;i++){
+    const d = today - (DAYS-1-i)*DAY;
+    if(hab.days[key(d)]){ run++; best=Math.max(best,run); } else run=0;
+  }
+  for(let i=0;;i++){ const d=today-i*DAY; if(hab.days[key(d)]) cur++; else break; }
+  return {cur, best};
+}
+function kpi(){ const d=db.get();
+  const done = d.filter(x=>x.days[key(today)]).length;
+  $('#kpi').textContent = done+' of '+d.length+' done today'; }
+function heat(hab){
+  const grid = h('div',{style:{display:'grid',gridTemplateRows:'repeat(7,11px)',
+    gridAutoFlow:'column',gridAutoColumns:'11px',gap:'3px'}});
+  // Align the first column to Monday so the rows read as weekdays.
+  const startPad = (new Date(today-(DAYS-1)*DAY).getDay()+6)%7;
+  range(startPad,()=>grid.append(h('div')));
+  range(DAYS, i => {
+    const d = today-(DAYS-1-i)*DAY, k = key(d), on = !!hab.days[k];
+    grid.append(h('div',{title: k+(on?' — done':' — missed'),
+      style:{width:'11px',height:'11px',borderRadius:'3px',cursor:'pointer',
+        background: on? hab.c : 'var(--bg3)', opacity: on?1:0.75,
+        outline: d===today? '1.5px solid var(--fg2)':''},
+      onclick:()=>toggle(hab,k)}));
+  });
+  return grid;
+}
+async function toggle(hab, k){
+  db.set(v=>v.map(x=>{ if(x.id!==hab.id) return x;
+    const days={...x.days}; days[k]? delete days[k] : days[k]=1; return {...x,days}; }));
+  kpi(); list();
+  try{ await submit('streaks.tick',{habit:hab.t, day:k}); }catch(e){}
+}
+function list(){
+  fill(view, h('div.col', db.get().map(hab=>{
+    const s = streak(hab), done = !!hab.days[key(today)];
+    const last7 = range(7,i=>hab.days[key(today-(6-i)*DAY)]?1:0).reduce((a,b)=>a+b,0);
+    return h('div.pane',
+      h('header', h('span',{style:{width:'10px',height:'10px',borderRadius:'3px',background:hab.c}}),
+        h('span',hab.t), h('span.spacer'),
+        h('span.tag'+(last7>=hab.goal?'.ok':''), last7+' / '+hab.goal+' this week'),
+        h('span.tag','streak '+s.cur), h('span.tag','best '+s.best),
+        h('button'+(done?'.p':'')+'.sm',{onclick:()=>toggle(hab,key(today))}, done?'✓ Done today':'Mark today'),
+        h('button.g.sm',{onclick:()=>{ db.set(v=>v.filter(x=>x.id!==hab.id)); kpi(); list(); }},'✕')),
+      h('div.body.scroll-x', heat(hab),
+        h('div.row',{style:{marginTop:'8px'}},
+          h('span.small.muted',WEEKS+' weeks ago'), h('span.spacer'), h('span.small.muted','today'))));
+  })));
+}
+function stats(){
+  const d = db.get();
+  const WD = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const byDay = WD.map((n,i)=>({k:n, v: d.reduce((a,hab)=>a + range(DAYS,j=>{
+    const dt = today-(DAYS-1-j)*DAY;
+    return ((new Date(dt).getDay()+6)%7)===i && hab.days[key(dt)] ? 1 : 0; }).reduce((x,y)=>x+y,0), 0)}));
+  const rate = d.map(hab=>({k:hab.t, v: Object.keys(hab.days).length/DAYS*100,
+    f:(Object.keys(hab.days).length/DAYS*100).toFixed(0)+'%'}));
+  fill(view, h('div.split',
+    h('div.pane',h('header','Completion rate over '+WEEKS+' weeks'),h('div.body', bars(rate))),
+    h('div.col',
+      h('div.pane',h('header','Which weekday holds up'),h('div.body', bars(byDay))),
+      h('div.pane',h('header','Streaks'),
+        h('table',h('thead',h('tr',h('th','Habit'),h('th','Current'),h('th','Longest'),h('th','Total days'))),
+          h('tbody', d.map(hab=>{ const s=streak(hab);
+            return h('tr', h('td.b',hab.t), h('td.num',s.cur), h('td.num',s.best),
+              h('td.num',Object.keys(hab.days).length)); })))))));
+}
+$('#new').onclick = () => {
+  const t=h('input',{placeholder:'What do you want to do?'});
+  const g=h('input',{type:'number',value:5,min:1,max:7});
+  const c=h('select',['#5b8cff','#3ecf8e','#8b5cf6','#f6b73c','#f4685e'].map(x=>h('option',{value:x},x)));
+  modal('New habit', h('div', h('div.field',h('label','Habit'),t),
+    h('div.row',h('div.field',{style:{flex:1}},h('label','Days per week'),g),
+      h('div.field',{style:{flex:1}},h('label','Colour'),c))),
+    ()=>{ if(!t.value.trim()) return;
+      db.set(v=>[...v,{id:uid(),t:t.value.trim(),c:c.value,goal:+g.value||5,days:{}}]);
+      kpi(); list(); toast('Habit added'); }, 'Add');
+};
+route({'':()=>{kpi();list();}, 'stats':()=>{kpi();stats();}, '*':()=>{kpi();list();}});
+</script>

@@ -1,0 +1,104 @@
+<!--hz {"title":"Commons","archetype":"forum / community","creator":"web","desc":"Discussion forum: categories, thread list with vote ranking, nested replies, tag filter and a new-thread composer backed by @hanzo/base.","nav":[["#/","Threads"],["#/new","New thread"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Commons</h1><span class="tag" id="n"></span>
+  <span class="spacer"></span><span id="sortbox"></span><a class="btn p" href="#/new">New thread</a>
+</div>
+<div class="split"><div class="pane"><header>Categories</header><ul class="list" id="cats"></ul>
+  <div class="body"><p class="hz-note" style="margin:0">Threads, authors and vote counts are synthetic demo content.</p></div></div>
+<div id="view"></div></div>
+<script>
+const {h,fill,$,store,rng,range,pick,uid,fmt,avatar,toast,submit,route,tabs,wire} = hz;
+const r = rng(3131);
+const CATS = ['Announcements','Help','Show and tell','Ideas','Meta'];
+const AUTH = ['nightbuild','ops_diary','tinyrepo','sdf_notes','cold_start','rasterline'];
+const T = [
+ ['How do you structure release notes for a rolling deploy?','Help','We deploy about twelve times a day and the changelog has become noise. Curious how others summarise.'],
+ ['Content-addressed releases: one month in','Show and tell','Switched publishing to a digest-addressed manifest. Rollback is now activating an older id. Notes and numbers inside.'],
+ ['Reserved subdomain list — what belongs on it?','Meta','We reserve api, admin, docs and about forty more. What have we missed that bit you later?'],
+ ['Proposal: per-project data space by default','Ideas','Every deployed page gets a submissions collection with a public create rule. Thoughts on the abuse surface?'],
+ ['Static export keeps dropping my API routes','Help','A route handler cannot exist under a static export. What is the least surprising way to fail here?'],
+ ['Weekly release: edge cache, wildcard TLS, faster cold start','Announcements','Highlights and the full list of changes.'],
+ ['Show: a raymarcher that fits in one fragment shader','Show and tell','No meshes, no textures, about 60 lines of GLSL. Runs at 60fps on integrated graphics.'],
+ ['Should a status page live on the infrastructure it reports?','Meta','Asking for a friend who had an interesting Tuesday.'],
+ ['Better defaults for form submissions','Ideas','Right now anyone can create and only the owner can read. Is that the right default?'],
+ ['Cold start went from 900ms to 120ms','Show and tell','Mostly by not doing work at boot that could be done lazily.'],
+];
+const seed = T.map(([t,c,b],i)=>({
+  id:uid(), t, c, b, by: AUTH[i%AUTH.length], at: Date.now()-Math.round(r()*240)*36e5,
+  votes: Math.round(r()*90), tags: pick(r,[['deploys'],['deploys','edge'],['dx'],['design','dx'],['ops']]),
+  replies: range(Math.round(r()*4), j=>({by:pick(r,AUTH), t: pick(r,[
+    'This matches our experience — the digest is the only id worth trusting.',
+    'We went the other way and regretted it about a week later.',
+    'Do you have numbers for the cold path?','Strong yes from me.',
+    'Careful: that only holds if the manifest is canonicalised first.'])
+    , at: Date.now()-Math.round(r()*100)*36e5, votes: Math.round(r()*20)})),
+}));
+const db = store('commons', seed);
+const votes = store('commons.votes', []);
+const view = $('#view');
+let cat='All', sort='Top';
+
+const score = t => t.votes + (votes.get().includes(t.id)?1:0);
+function cats(){
+  const d = db.get();
+  fill($('#cats'), ['All',...CATS].map(c=>h('li',{style:{cursor:'pointer',background:c===cat?'var(--bg3)':''},
+    onclick:()=>{cat=c;list();}}, h('span'+(c===cat?'.b':''),c), h('span.spacer'),
+    h('span.tag', c==='All'?d.length:d.filter(x=>x.c===c).length))));
+}
+function list(){
+  let d = db.get().filter(x=>cat==='All'||x.c===cat);
+  d = sort==='Top' ? [...d].sort((a,b)=>score(b)-score(a))
+    : sort==='New' ? [...d].sort((a,b)=>b.at-a.at)
+    : [...d].sort((a,b)=>b.replies.length-a.replies.length);
+  $('#n').textContent = d.length+' threads';
+  fill(view, h('div.pane', h('ul.list', d.map(t=>{
+    const up = votes.get().includes(t.id);
+    return h('li',{style:{alignItems:'flex-start'}},
+      h('div.col',{style:{gap:'2px',alignItems:'center',width:'44px',flex:'none'}},
+        h('button.g.sm',{style:{color:up?'var(--acc)':'',padding:'0 6px'},
+          onclick:()=>{votes.set(v=>up?v.filter(x=>x!==t.id):[...v,t.id]);list();}},'▲'),
+        h('span.b.num',score(t))),
+      h('div',{style:{minWidth:0,flex:1,cursor:'pointer'},onclick:()=>open(t)},
+        h('div.b',t.t),
+        h('div.small.muted',{style:{margin:'3px 0 6px'}}, t.b.slice(0,110)+(t.b.length>110?'…':'')),
+        h('div.row',{style:{gap:'6px'}}, h('span.tag',t.c),
+          t.tags.map(g=>h('span.tag.acc','#'+g)),
+          h('span.small.muted','by '+t.by+' · '+fmt.ago(t.at)+' · '+t.replies.length+' replies'))));
+  }))));
+}
+function open(t){
+  fill(view, h('div.pane',
+    h('header', h('button.g.sm',{onclick:list},'‹ Back'), h('span.spacer'), h('span.tag',t.c)),
+    h('div.body',
+      h('h2',t.t),
+      h('div.row',{style:{gap:'8px',marginBottom:'10px'}}, avatar(t.by,26),
+        h('span.small.muted',t.by+' · '+fmt.ago(t.at)), t.tags.map(g=>h('span.tag.acc','#'+g))),
+      h('p',t.b)),
+    h('ul.list', t.replies.length? t.replies.map(rp=>h('li',{style:{alignItems:'flex-start'}},
+        avatar(rp.by,28), h('div',h('div.row',{style:{gap:'6px'}},h('span.b',rp.by),
+          h('span.small.muted',fmt.ago(rp.at))), h('div.small',{style:{marginTop:'3px'}},rp.t))))
+      : h('li',h('span.muted.small','No replies yet.'))),
+    h('div.body', (()=>{ const f = h('form', h('div.field',h('label','Reply'),
+        h('textarea',{name:'body',required:true,placeholder:'Add to the discussion…'})),
+        h('button.p',{type:'submit'},'Post reply'));
+      return wire(f,'commons.reply',(d)=>{ db.set(v=>v.map(x=>x.id===t.id?
+        {...x,replies:[...x.replies,{by:'you',t:d.body,at:Date.now(),votes:0}]}:x));
+        open(db.get().find(x=>x.id===t.id)); }); })())));
+}
+function neu(){
+  const f = h('form',
+    h('div.row',h('div.field',{style:{flex:2}},h('label','Title'),h('input',{name:'title',required:true})),
+      h('div.field',{style:{flex:1}},h('label','Category'),h('select',{name:'category'},CATS.map(c=>h('option',c))))),
+    h('div.field',h('label','Body'),h('textarea',{name:'body',required:true,style:{minHeight:'140px'}})),
+    h('div.field',h('label','Tags (comma separated)'),h('input',{name:'tags',placeholder:'deploys, dx'})),
+    h('button.p',{type:'submit'},'Publish thread'));
+  wire(f,'commons.thread',(d)=>{
+    db.set(v=>[{id:uid(),t:d.title,c:d.category,b:d.body,by:'you',at:Date.now(),votes:1,
+      tags:(d.tags||'').split(',').map(s=>s.trim()).filter(Boolean),replies:[]},...v]);
+    location.hash='#/'; cats(); list();
+  });
+  fill(view, h('div.pane',h('header','Start a discussion'),h('div.body',f)));
+}
+fill($('#sortbox'), tabs(['Top','New','Active'], s=>{sort=s;if(!location.hash.includes('new'))list();}));
+route({'':()=>{cats();list();}, 'new':()=>{cats();neu();}, '*':()=>{cats();list();}});
+</script>

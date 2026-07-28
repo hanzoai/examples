@@ -1,0 +1,140 @@
+<!--hz {"title":"Checkout","archetype":"ecommerce checkout","creator":"web","desc":"Multi-step checkout: cart review, address with real validation, shipping options that change the total, an order summary with promo codes, and a confirmation written to @hanzo/base.","nav":[["#/","Checkout"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Checkout</h1>
+  <span class="spacer"></span><span id="steps" class="row" style="gap:6px"></span>
+</div>
+<div class="split r"><div id="view"></div>
+  <div class="col">
+    <div class="pane"><header>Order summary</header><div class="body" id="sum"></div></div>
+    <div class="pane"><div class="body"><p class="hz-note" style="margin:0">No payment method is collected anywhere in this flow and no charge is made. The confirmation record is written to @hanzo/base so the pattern is complete end to end.</p></div></div>
+  </div></div>
+<script>
+const {h,fill,$,store,fmt,toast,submit,route} = hz;
+const ITEMS = [
+  {id:'a', n:'Cast iron skillet', v:'12 inch', pr:62, q:1, hue:24},
+  {id:'b', n:'Linen apron', v:'One size', pr:42, q:2, hue:196},
+  {id:'c', n:'Stoneware mug', v:'Slate', pr:18, q:4, hue:318},
+];
+const SHIP = [['standard','Standard · 5–7 days',0],['express','Express · 2 days',12],['next','Next day',24]];
+const PROMO = {WELCOME10:0.10, EXAMPLE20:0.20};
+const cart = store('checkout.cart', ITEMS);
+const order = store('checkout.order', {ship:'standard', promo:'', done:null});
+const STEPS = [['','Cart'],['address','Address'],['shipping','Shipping'],['review','Review']];
+const view = $('#view');
+
+const money = v => fmt.money(v);
+function totals(){
+  const c = cart.get(), o = order.get();
+  const sub = c.reduce((a,x)=>a+x.pr*x.q,0);
+  const ship = SHIP.find(s=>s[0]===o.ship)[2];
+  const disc = sub * (PROMO[o.promo?.toUpperCase()] || 0);
+  const tax = +((sub-disc)*0.0875).toFixed(2);
+  return {sub, ship, disc, tax, total: sub-disc+ship+tax};
+}
+function summary(){
+  const t = totals(), c = cart.get();
+  const row = (k,v,b) => h('div.row',{style:{justifyContent:'space-between',marginBottom:'5px'}},
+    h('span'+(b?'.b':'.small.muted'),k), h('span.num'+(b?'.b':''),v));
+  fill($('#sum'),
+    h('ul.list',{style:{margin:'-14px -14px 12px'}}, c.map(x=>h('li',
+      h('div',{style:{width:'34px',height:'34px',borderRadius:'6px',flex:'none',
+        background:`linear-gradient(135deg,hsl(${x.hue} 46% 34%),hsl(${(x.hue+40)%360} 42% 22%))`}}),
+      h('div',{style:{minWidth:0}},h('div.small.b.trunc',x.n),h('div.small.muted',x.v+' × '+x.q)),
+      h('span.spacer'), h('span.small.num',money(x.pr*x.q))))),
+    row('Subtotal',money(t.sub)),
+    t.disc? row('Promotion','−'+money(t.disc)) : null,
+    row('Shipping', t.ship? money(t.ship):'Free'),
+    row('Estimated tax',money(t.tax)), h('hr'), row('Total',money(t.total),true));
+}
+function stepbar(){
+  const at = location.hash.replace(/^#\/?/,'');
+  fill($('#steps'), STEPS.map(([k,l],i)=>h('span.tag'+(k===at?' acc':''),
+    {style:{cursor:'pointer'},onclick:()=>{location.hash='#/'+k;}}, (i+1)+'. '+l)));
+}
+function cartView(){
+  fill(view, h('div.pane',h('header','Your items'),
+    h('ul.list', cart.get().map(x=>h('li',
+      h('div',{style:{width:'52px',height:'52px',borderRadius:'8px',flex:'none',
+        background:`linear-gradient(135deg,hsl(${x.hue} 46% 34%),hsl(${(x.hue+40)%360} 42% 22%))`}}),
+      h('div',{style:{minWidth:0}},h('div.b',x.n),h('div.small.muted',x.v)),
+      h('span.spacer'),
+      h('div.row',{style:{gap:'4px'}},
+        h('button.sm',{onclick:()=>{cart.set(v=>v.map(y=>y.id===x.id?{...y,q:Math.max(1,y.q-1)}:y));cartView();summary();}},'−'),
+        h('span.num',x.q),
+        h('button.sm',{onclick:()=>{cart.set(v=>v.map(y=>y.id===x.id?{...y,q:y.q+1}:y));cartView();summary();}},'+')),
+      h('span.b.num',{style:{width:'80px',textAlign:'right'}},money(x.pr*x.q)),
+      h('button.g.sm',{onclick:()=>{cart.set(v=>v.filter(y=>y.id!==x.id));cartView();summary();}},'✕')))),
+    h('div.body',h('div.row', h('a.btn.p',{href:'#/address',style:{marginLeft:'auto'}},'Continue to address ›')))));
+}
+function addressView(){
+  const f = h('form',
+    h('div.row',h('div.field',{style:{flex:1}},h('label','First name'),h('input',{name:'first',required:true})),
+      h('div.field',{style:{flex:1}},h('label','Last name'),h('input',{name:'last',required:true}))),
+    h('div.field',h('label','Email'),h('input',{name:'email',type:'email',required:true,placeholder:'you@example.invalid'})),
+    h('div.field',h('label','Street address'),h('input',{name:'street',required:true})),
+    h('div.row',h('div.field',{style:{flex:2}},h('label','City'),h('input',{name:'city',required:true})),
+      h('div.field',{style:{flex:1}},h('label','Postcode'),h('input',{name:'zip',required:true,pattern:'[A-Za-z0-9 -]{3,10}'}))),
+    h('div.field',h('label','Country'),h('select',{name:'country'},
+      ['United States','Canada','United Kingdom','Netherlands','Japan','Australia'].map(c=>h('option',c)))),
+    h('div.row',h('a.btn',{href:'#/'},'‹ Back'),h('span.spacer'),h('button.p',{type:'submit'},'Continue to shipping ›')));
+  f.onsubmit = e => { e.preventDefault();
+    if(!f.reportValidity()) return;
+    order.set(v=>({...v, address: Object.fromEntries(new FormData(f).entries())}));
+    location.hash = '#/shipping'; };
+  const saved = order.get().address || {};
+  Object.entries(saved).forEach(([k,v])=>{ const el=f.elements[k]; if(el) el.value=v; });
+  fill(view, h('div.pane',h('header','Where should it go?'),h('div.body',f)));
+}
+function shippingView(){
+  fill(view, h('div.pane',h('header','Shipping method'),
+    h('ul.list', SHIP.map(([k,l,c])=>h('li',{style:{cursor:'pointer'},
+      onclick:()=>{order.set(v=>({...v,ship:k})); shippingView(); summary();}},
+      h('input',{type:'radio',checked:order.get().ship===k,readOnly:true}),
+      h('div',h('div.b',l.split(' · ')[0]),h('div.small.muted',l.split(' · ')[1])),
+      h('span.spacer'), h('span.b.num', c? money(c):'Free')))),
+    h('div.body',
+      h('div.field',h('label','Promotion code'),
+        h('div.inline', h('input',{id:'promo',value:order.get().promo,placeholder:'WELCOME10'}),
+          h('button',{onclick:()=>{ const v=$('#promo').value.trim().toUpperCase();
+            if(!PROMO[v]) return toast('That code is not recognised');
+            order.set(o=>({...o,promo:v})); summary(); toast((PROMO[v]*100)+'% applied'); }},'Apply'))),
+      h('div.row',h('a.btn',{href:'#/address'},'‹ Back'),h('span.spacer'),
+        h('a.btn.p',{href:'#/review'},'Review order ›')))));
+}
+function reviewView(){
+  const o = order.get(), a = o.address, t = totals();
+  if(o.done) return doneView();
+  fill(view, h('div.pane',h('header','Review and place order'),h('div.body',
+    a ? h('div.card.tight',{style:{marginBottom:'12px'}},
+        h('div.small.muted','Shipping to'),
+        h('div.b',a.first+' '+a.last),
+        h('div.small',a.street+', '+a.city+' '+a.zip),
+        h('div.small.muted',a.country+' · '+a.email))
+      : h('div.card.tight',{style:{marginBottom:'12px'}},
+        h('span.small.muted','No address yet — '), h('a',{href:'#/address'},'add one')),
+    h('div.card.tight',{style:{marginBottom:'12px'}},
+      h('div.small.muted','Shipping method'),
+      h('div.b',SHIP.find(s=>s[0]===o.ship)[1])),
+    h('p.small.muted','A real checkout would collect a payment method at this point. This example deliberately does not, so nothing can be charged.'),
+    h('div.row',h('a.btn',{href:'#/shipping'},'‹ Back'),h('span.spacer'),
+      h('button.p',{disabled:!a, onclick:async()=>{
+        const num = 'ORD-'+Math.random().toString(36).slice(2,8).toUpperCase();
+        order.set(v=>({...v, done:{num, at:Date.now(), total:t.total}}));
+        try{ await submit('checkout.order',{order:num, total:t.total, items:cart.get().length, ship:o.ship});
+          toast('Order recorded in @hanzo/base'); }catch(e){ toast('Order recorded locally'); }
+        doneView();
+      }},'Place order · '+money(t.total))))));
+}
+function doneView(){
+  const d = order.get().done;
+  fill(view, h('div.pane',h('header','Order placed'),h('div.body',
+    h('div',{style:{fontSize:'42px',lineHeight:1,marginBottom:'10px'}},'✓'),
+    h('h2','Thank you'),
+    h('p','Order '+d.num+' was recorded at '+new Date(d.at).toLocaleString()+'.'),
+    h('p.small.muted','No payment was taken and nothing will ship — this is an official Hanzo example of the checkout pattern.'),
+    h('div.row',h('button',{onclick:()=>{order.set({ship:'standard',promo:'',done:null});cart.set(ITEMS);location.hash='#/';cartView();summary();}},'Start over')))));
+}
+addEventListener('hashchange', stepbar);
+route({'':()=>{cartView();}, 'address':addressView, 'shipping':shippingView, 'review':reviewView, '*':cartView});
+stepbar(); summary();
+</script>

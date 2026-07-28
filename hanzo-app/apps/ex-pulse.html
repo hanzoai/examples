@@ -1,0 +1,77 @@
+<!--hz {"title":"Pulse","archetype":"analytics dashboard","creator":"data","desc":"Product analytics dashboard: time series, funnel, cohort retention and channel mix over synthetic demo data.","nav":[["#/","Overview"],["#/funnel","Funnel"],["#/retention","Retention"],["#/sources","Sources"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Product analytics</h1>
+  <span class="tag acc" id="rangeTag">Last 30 days</span>
+  <span class="spacer"></span>
+  <span id="ranges"></span>
+</div>
+<div class="grid k4" id="stats" style="margin-bottom:16px"></div>
+<div class="split r">
+  <div class="pane"><header>Active users <span class="spacer"></span><span class="small muted" id="serieName">daily</span></header>
+    <div class="body" id="chart"></div></div>
+  <div class="col">
+    <div class="pane"><header>Traffic mix</header><div class="body" id="mix"></div></div>
+    <div class="pane"><header>Top pages</header><div class="body" id="pages"></div></div>
+  </div>
+</div>
+<div id="view" style="margin-top:16px"></div>
+<p class="hz-note" style="margin-top:18px">All figures are generated from a fixed seed for demonstration. They are not measurements of any real product.</p>
+<script>
+const {h,fill,rng,range,fmt,area,bars,donut,spark,tabs,route,$} = hz;
+const r = rng(20260728);
+const DAYS = 90;
+const series = range(DAYS, i => Math.round(2400 + i*18 + Math.sin(i/4.2)*260 + r()*420));
+const labels = range(DAYS, i => fmt.date(Date.now() - (DAYS-1-i)*864e5));
+let win = 30;
+
+const CH = [{k:'Organic search',v:38},{k:'Direct',v:24},{k:'Referral',v:16},{k:'Social',v:13},{k:'Email',v:9}];
+const PAGES = [{k:'/pricing',v:18420},{k:'/docs/quickstart',v:14310},{k:'/',v:12980},{k:'/changelog',v:7640},{k:'/blog/agents',v:5120}];
+const FUNNEL = [{k:'Visited site',v:48210},{k:'Started signup',v:12840},{k:'Verified email',v:9310},{k:'Created project',v:6120},{k:'Deployed',v:3980},{k:'Upgraded',v:1240}];
+
+function draw(){
+  const cut = series.slice(-win), cl = labels.slice(-win);
+  const tot = cut.reduce((a,b)=>a+b,0), prev = series.slice(-win*2,-win).reduce((a,b)=>a+b,0)||tot;
+  const d = (tot-prev)/prev*100;
+  fill($('#stats'),
+    stat('Active users', fmt.n(tot), d, cut),
+    stat('Sessions', fmt.n(Math.round(tot*1.62)), d*0.7, cut.map(v=>v*1.6)),
+    stat('Conversion', (FUNNEL[5].v/FUNNEL[0].v*100).toFixed(2)+'%', 0.42, cut.map(v=>v%37+40)),
+    stat('Avg. session', '4m 18s', -1.9, cut.map(v=>v%23+30)));
+  fill($('#chart'), area(cut, cl));
+  $('#rangeTag').textContent = 'Last '+win+' days';
+  $('#serieName').textContent = fmt.n(Math.round(tot/win))+' avg/day';
+}
+function stat(k,v,d,sp){
+  return h('div.stat', h('div.k',k), h('div.v',v),
+    h('div.row',{style:{gap:'8px',marginTop:'4px'}},
+      h('span.d.'+(d>=0?'up':'down'), fmt.pct(d)),
+      spark(sp, d>=0?'#3ecf8e':'#f4685e', 90, 24)));
+}
+fill($('#mix'), donut(CH,140));
+fill($('#pages'), bars(PAGES));
+fill($('#ranges'), tabs(['7d','30d','90d'], n => { win = +n.replace('d',''); draw(); }, '30d'));
+
+const views = {
+  '': () => fill($('#view')),
+  'funnel': () => fill($('#view'), h('div.pane',
+    h('header','Signup funnel'),
+    h('div.body', bars(FUNNEL.map((s,i)=>({k:s.k, v:s.v, f:fmt.n(s.v)+'  ·  '+(s.v/FUNNEL[0].v*100).toFixed(1)+'%'})))))),
+  'retention': () => {
+    const rows = range(8, w => range(9, d => d<=8-w ? Math.max(6, Math.round(100*Math.exp(-d/3.4) - w*1.1 + r()*4)) : null));
+    fill($('#view'), h('div.pane', h('header','Weekly cohort retention'),
+      h('div.body.scroll-x', h('table',
+        h('thead', h('tr', h('th','Cohort'), ...range(9, d => h('th','W'+d)))),
+        h('tbody', rows.map((row,i) => h('tr', h('td', 'Week '+(i+1)),
+          ...row.map(v => h('td', v==null?h('span.muted','—'):
+            h('span',{style:{display:'inline-block',padding:'2px 7px',borderRadius:'6px',
+              background:'rgba(91,140,255,'+(v/110).toFixed(2)+')'}}, v+'%'))))))))));
+  },
+  'sources': () => fill($('#view'), h('div.pane', h('header','Acquisition channels'),
+    h('table', h('thead',h('tr',h('th','Channel'),h('th','Users'),h('th','Conv.'),h('th','Trend'))),
+      h('tbody', CH.map((c,i)=>h('tr', h('td',c.k), h('td.num',fmt.n(c.v*812)),
+        h('td.num',(1.9-i*0.2).toFixed(2)+'%'),
+        h('td', spark(range(20,()=>r()*40+20), hz.PAL[i], 100, 22)))))))),
+};
+route({'':views[''],'funnel':views.funnel,'retention':views.retention,'sources':views.sources,'*':views['']});
+draw();
+</script>

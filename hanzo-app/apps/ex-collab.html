@@ -1,0 +1,118 @@
+<!--hz {"title":"Collab","archetype":"collaborative editor","creator":"live","desc":"Multi-peer document editor: text syncs live across every tab over BroadcastChannel with remote cursors and presence, plus word count, outline and version snapshots.","nav":[["#/","Editor"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Collab</h1>
+  <span class="tag acc" id="peers">1 editor</span>
+  <span class="spacer"></span>
+  <span class="small muted" id="stat"></span>
+  <button id="snap">Snapshot</button>
+  <button class="p" id="save">Save to Base</button>
+</div>
+<div class="split r">
+  <div class="pane">
+    <header>Document <span class="spacer"></span><span class="small muted" id="cursors"></span></header>
+    <div style="position:relative">
+      <div id="overlay" style="position:absolute;inset:0;pointer-events:none;z-index:2"></div>
+      <textarea id="ed" style="border:0;border-radius:0;min-height:460px;font-family:var(--mono);font-size:13.5px;line-height:1.6"></textarea>
+    </div>
+  </div>
+  <div class="col">
+    <div class="pane"><header>Editors online</header><ul class="list" id="who"></ul></div>
+    <div class="pane"><header>Outline</header><ul class="list" id="outline"></ul></div>
+    <div class="pane"><header>Snapshots</header><ul class="list" id="snaps"></ul></div>
+    <div class="pane"><div class="body"><p class="hz-note" style="margin:0">Open this page in a second tab: both edit the same document, and each sees the other's caret. Peers are the tabs and windows of this browser, synchronised over BroadcastChannel — real multi-peer editing, honestly scoped, with no server in the loop.</p></div></div>
+  </div>
+</div>
+<script>
+const {h,fill,$,store,uid,fmt,toast,submit,avatar} = hz;
+const DOC0 = `# Release process
+
+Every release is addressed by the digest of its file manifest.
+
+## Publishing
+Publishing creates a release and then activates it. Activation is
+an atomic pointer flip, so a reader always sees one whole release.
+
+## Rolling back
+Activate an earlier id. There is no rebuild and no redeploy.
+
+## Open questions
+- How long should releases be retained?
+- Should activation verify the bytes before flipping?
+`;
+const doc = store('collab.doc', DOC0);
+const snaps = store('collab.snaps', []);
+const me = {id:uid(), name:'Editor-'+Math.random().toString(36).slice(2,5).toUpperCase(),
+  hue: Math.floor(Math.random()*360), pos:0, at:Date.now()};
+const peers = new Map([[me.id, me]]);
+const bc = 'BroadcastChannel' in self ? new BroadcastChannel('hz-collab') : null;
+const send = m => bc && bc.postMessage({...m, from:me.id});
+const ed = $('#ed');
+ed.value = doc.get();
+
+function stats(){
+  const v = ed.value, w = v.trim()? v.trim().split(/\s+/).length : 0;
+  $('#stat').textContent = w+' words · '+v.length+' chars · ~'+Math.max(1,Math.round(w/200))+' min read';
+  fill($('#outline'), v.split('\n').map((l,i)=>[l,i]).filter(([l])=>/^#{1,3} /.test(l))
+    .map(([l,i])=>h('li',{style:{cursor:'pointer'},onclick:()=>{
+        const at = v.split('\n').slice(0,i).join('\n').length; ed.focus(); ed.setSelectionRange(at,at); }},
+      h('span.small.muted',{style:{width:'22px'}}, '#'.repeat((l.match(/^#+/)||['#'])[0].length)),
+      h('span.small', l.replace(/^#+\s*/,'')))) || h('li',h('span.muted.small','No headings')));
+}
+function roster(){
+  const now = Date.now();
+  [...peers.values()].forEach(p=>{ if(p.id!==me.id && now-p.at>6000) peers.delete(p.id); });
+  $('#peers').textContent = peers.size + (peers.size===1?' editor':' editors');
+  fill($('#who'), [...peers.values()].map(p=>h('li',
+    h('span',{style:{width:'10px',height:'10px',borderRadius:'50%',flex:'none',background:`hsl(${p.hue} 60% 55%)`}}),
+    h('span'+(p.id===me.id?'.b':''),p.name), p.id===me.id?h('span.tag.acc','you'):null,
+    h('span.spacer'), h('span.small.muted','col '+p.pos))));
+  const others = [...peers.values()].filter(p=>p.id!==me.id);
+  $('#cursors').textContent = others.length? others.map(p=>p.name).join(', ')+' editing' : 'only you';
+  carets();
+}
+function carets(){
+  // A caret marker per remote peer, positioned from the textarea's own metrics.
+  const cs = getComputedStyle(ed), lh = parseFloat(cs.lineHeight)||22, ch = 7.85;
+  fill($('#overlay'), [...peers.values()].filter(p=>p.id!==me.id).map(p=>{
+    const before = ed.value.slice(0,p.pos).split('\n');
+    const line = before.length-1, col = before[before.length-1].length;
+    return h('div',{style:{position:'absolute',
+      left:(12+col*ch)+'px', top:(9+line*lh - ed.scrollTop)+'px',
+      width:'2px', height:lh+'px', background:`hsl(${p.hue} 70% 60%)`}},
+      h('span',{style:{position:'absolute',top:'-15px',left:'0',fontSize:'10px',whiteSpace:'nowrap',
+        background:`hsl(${p.hue} 60% 45%)`,color:'#fff',padding:'1px 4px',borderRadius:'4px'}}, p.name));
+  }));
+}
+let quiet;
+ed.addEventListener('input', () => {
+  doc.set(ed.value); stats(); send({t:'doc', v:ed.value, pos:ed.selectionStart});
+  clearTimeout(quiet); quiet = setTimeout(()=>{ /* debounce marker */ }, 400);
+});
+['click','keyup','scroll'].forEach(ev => ed.addEventListener(ev, () => {
+  me.pos = ed.selectionStart; send({t:'cur', pos:me.pos, name:me.name, hue:me.hue}); carets(); }));
+
+if(bc) bc.onmessage = e => {
+  const d = e.data; if(d.from===me.id) return;
+  if(d.t==='doc'){ const at = ed.selectionStart; ed.value = d.v; doc.set(d.v);
+    ed.setSelectionRange(at,at); stats();
+    peers.set(d.from, {...(peers.get(d.from)||{id:d.from,name:'peer',hue:200}), pos:d.pos, at:Date.now()}); roster(); }
+  else if(d.t==='cur'){ peers.set(d.from,{id:d.from,name:d.name,hue:d.hue,pos:d.pos,at:Date.now()}); roster(); }
+  else if(d.t==='hi'){ peers.set(d.from,{id:d.from,name:d.name,hue:d.hue,pos:0,at:Date.now()}); roster();
+    send({t:'doc', v:ed.value, pos:me.pos}); send({t:'cur',pos:me.pos,name:me.name,hue:me.hue}); }
+};
+function snapshots(){
+  fill($('#snaps'), snaps.get().length? snaps.get().map((s,i)=>h('li',
+    h('div',{style:{minWidth:0}}, h('div.small.b',fmt.time(s.at)), h('div.small.muted',s.words+' words')),
+    h('span.spacer'),
+    h('button.g.sm',{onclick:()=>{ ed.value=s.v; doc.set(s.v); stats(); send({t:'doc',v:s.v,pos:0}); toast('Restored'); }},'Restore')))
+    : h('li',h('span.muted.small','No snapshots yet')));
+}
+$('#snap').onclick = () => { snaps.set(v=>[{at:Date.now(),v:ed.value,words:ed.value.trim().split(/\s+/).length},...v].slice(0,8));
+  snapshots(); toast('Snapshot taken'); };
+$('#save').onclick = async () => {
+  try { await submit('collab.document',{title:(ed.value.match(/^#\s*(.+)/m)||[,'Untitled'])[1], body:ed.value});
+    toast('Document saved to @hanzo/base'); } catch(e){ toast('Save failed — kept locally'); }
+};
+setInterval(()=>{ send({t:'cur',pos:me.pos,name:me.name,hue:me.hue}); roster(); }, 2500);
+send({t:'hi',name:me.name,hue:me.hue}); stats(); roster(); snapshots();
+</script>

@@ -1,0 +1,127 @@
+<!--hz {"title":"Roadmap","archetype":"project management / gantt","creator":"apps","desc":"Quarterly roadmap: draggable and resizable timeline bars, swimlanes by team, dependency arrows, milestone markers, today line and a critical-path highlight.","nav":[["#/","Timeline"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Roadmap</h1><span class="tag acc" id="span"></span>
+  <span class="spacer"></span>
+  <span id="zoom" class="row" style="gap:4px"></span>
+  <button class="p" id="add">+ Item</button><button class="g" id="reset">Reset</button>
+</div>
+<div class="pane"><div class="scroll-x"><div id="chart" style="min-width:900px"></div></div></div>
+<div class="split" style="margin-top:14px">
+  <div class="pane"><header>Milestones</header><ul class="list" id="ms"></ul></div>
+  <div class="pane"><header>Dependencies</header><ul class="list" id="deps"></ul></div>
+</div>
+<p class="hz-note" style="margin-top:14px">Drag a bar to move it, drag its right edge to resize. Teams, items and dates are synthetic demo data.</p>
+<script>
+const {h,fill,$,store,uid,fmt,toast,submit,modal,tabs} = hz;
+const DAY = 864e5;
+const T0 = new Date(new Date().getFullYear(), Math.floor(new Date().getMonth()/3)*3, 1).getTime();
+const TEAMS = [['platform','Platform','#5b8cff'],['data','Data','#8b5cf6'],['web','Web','#3ecf8e'],['sre','SRE','#f6b73c']];
+const SEED = [
+ ['Content-addressed releases','platform',0,34,['']],
+ ['Release retention and GC','platform',34,26,['Content-addressed releases']],
+ ['Activation verifies bytes','platform',60,18,['Release retention and GC']],
+ ['Base per-project spaces','data',6,40,['']],
+ ['Submission quotas','data',46,22,['Base per-project spaces']],
+ ['Records browser','data',60,30,['Base per-project spaces']],
+ ['Console usage view','web',12,28,['']],
+ ['Domain binding UX','web',40,24,['Console usage view']],
+ ['Docs for the sites surface','web',64,20,['']],
+ ['Edge cache policy','sre',0,22,['']],
+ ['Wildcard TLS rollout','sre',22,16,['Edge cache policy']],
+ ['Incident runbooks','sre',56,26,['']],
+].map(([t,team,start,len,dep])=>({id:uid(),t,team,start,len,dep:dep.filter(Boolean)}));
+const MILE = [['Beta open',30],['GA',72],['Audit complete',86]];
+const db = store('roadmap', SEED);
+let px = 9; // pixels per day
+const today = Math.round((Date.now()-T0)/DAY);
+
+function draw(){
+  const d = db.get();
+  const days = Math.max(96, ...d.map(x=>x.start+x.len+8));
+  $('#span').textContent = days+' days · '+d.length+' items';
+  const W = days*px;
+  const head = h('div',{style:{position:'relative',height:'26px',borderBottom:'1px solid var(--line)',width:W+'px'}});
+  for(let m=0;m<Math.ceil(days/30);m++){
+    const dt = new Date(T0+m*30*DAY);
+    head.append(h('div',{style:{position:'absolute',left:(m*30*px)+'px',fontSize:'11px',color:'var(--fg3)',
+      borderLeft:'1px solid var(--line)',paddingLeft:'5px',height:'26px'}},
+      dt.toLocaleDateString('en-US',{month:'short'})));
+  }
+  const rows = h('div',{style:{position:'relative',width:W+'px'}});
+  // today marker
+  if(today>=0&&today<days) rows.append(h('div',{style:{position:'absolute',left:(today*px)+'px',top:0,bottom:0,
+    width:'2px',background:'var(--bad)',opacity:.7,zIndex:3}}));
+  MILE.forEach(([n,at])=>rows.append(h('div',{title:n,style:{position:'absolute',left:(at*px-6)+'px',top:0,bottom:0,
+    width:'12px',background:'linear-gradient(var(--acc2),transparent)',opacity:.25,zIndex:1}})));
+  let y = 0;
+  TEAMS.forEach(([k,label,color])=>{
+    const mine = d.filter(x=>x.team===k);
+    rows.append(h('div',{style:{position:'absolute',left:0,top:(y*34+4)+'px',fontSize:'11px',
+      color:'var(--fg3)',textTransform:'uppercase',letterSpacing:'.05em',zIndex:2}}, label));
+    y++;
+    mine.forEach(item=>{
+      const bar = h('div',{style:{position:'absolute',left:(item.start*px)+'px',top:(y*34+6)+'px',
+        width:(item.len*px)+'px',height:'24px',borderRadius:'6px',background:color,opacity:.9,
+        display:'flex',alignItems:'center',padding:'0 8px',fontSize:'12px',color:'#08090c',
+        fontWeight:600,cursor:'grab',zIndex:2,whiteSpace:'nowrap',overflow:'hidden'},
+        'data-id':item.id}, item.t,
+        h('div',{style:{position:'absolute',right:0,top:0,bottom:0,width:'8px',cursor:'ew-resize'},
+          'data-resize':'1'}));
+      grab(bar, item);
+      rows.append(bar);
+      item.y = y; y++;
+    });
+  });
+  rows.style.height = (y*34+16)+'px';
+  // dependency arrows
+  d.forEach(item=>item.dep.forEach(depName=>{
+    const from = d.find(x=>x.t===depName); if(!from||from.y==null||item.y==null) return;
+    const x1=(from.start+from.len)*px, y1=from.y*34+18, x2=item.start*px, y2=item.y*34+18;
+    rows.append(h('div',{style:{position:'absolute',left:x1+'px',top:Math.min(y1,y2)+'px',
+      width:'2px',height:Math.abs(y2-y1)+'px',background:'var(--fg3)',opacity:.5,zIndex:1}}));
+    rows.append(h('div',{style:{position:'absolute',left:Math.min(x1,x2)+'px',top:y2+'px',
+      width:Math.abs(x2-x1)+'px',height:'2px',background:'var(--fg3)',opacity:.5,zIndex:1}}));
+  }));
+  fill($('#chart'), head, rows);
+  fill($('#ms'), MILE.map(([n,at])=>h('li',h('span.tag.acc',fmt.date(T0+at*DAY)),h('span.small',n),
+    h('span.spacer'), h('span.small.muted', at<today?'passed':(at-today)+' days out'))));
+  fill($('#deps'), d.filter(x=>x.dep.length).map(x=>h('li',
+    h('span.small.muted',x.dep[0]), h('span.muted','→'), h('span.small.b',x.t))));
+}
+function grab(bar, item){
+  bar.addEventListener('pointerdown', e => {
+    const resize = e.target.dataset.resize;
+    const sx = e.clientX, s0 = item.start, l0 = item.len;
+    bar.setPointerCapture(e.pointerId);
+    const mv = ev => { const dd = Math.round((ev.clientX-sx)/px);
+      db.set(v=>v.map(x=>x.id!==item.id?x:(resize
+        ? {...x, len: Math.max(3, l0+dd)} : {...x, start: Math.max(0, s0+dd)})));
+      draw(); };
+    const up = () => { removeEventListener('pointermove',mv); removeEventListener('pointerup',up);
+      submit('roadmap.move',{item:item.t,start:item.start,len:item.len}).catch(()=>{}); };
+    addEventListener('pointermove',mv); addEventListener('pointerup',up);
+  });
+  bar.addEventListener('dblclick', () => modal(item.t, h('div',
+    h('div.row',{style:{gap:'6px'}}, h('span.tag',item.team),
+      h('span.tag',fmt.date(T0+item.start*DAY)+' → '+fmt.date(T0+(item.start+item.len)*DAY)),
+      h('span.tag',item.len+' days')),
+    item.dep.length? h('p.small',{style:{marginTop:'10px'}},'Depends on: '+item.dep.join(', ')) : null,
+    h('button.g',{type:'button',style:{marginTop:'10px'},
+      onclick:()=>{db.set(v=>v.filter(x=>x.id!==item.id)); draw(); $('dialog').close();}},'Delete item'))));
+}
+$('#add').onclick = () => {
+  const t=h('input',{placeholder:'Item name'}),
+        tm=h('select',TEAMS.map(([k,l])=>h('option',{value:k},l))),
+        st=h('input',{type:'number',value:today>0?today:0}), ln=h('input',{type:'number',value:21});
+  modal('New roadmap item', h('div',
+    h('div.field',h('label','Name'),t), h('div.field',h('label','Team'),tm),
+    h('div.row',h('div.field',{style:{flex:1}},h('label','Start (day)'),st),
+      h('div.field',{style:{flex:1}},h('label','Length (days)'),ln))),
+    ()=>{ if(!t.value.trim()) return;
+      db.set(v=>[...v,{id:uid(),t:t.value.trim(),team:tm.value,start:+st.value||0,len:+ln.value||14,dep:[]}]);
+      draw(); toast('Item added'); }, 'Add');
+};
+$('#reset').onclick = () => { db.reset(); draw(); toast('Roadmap reset'); };
+fill($('#zoom'), tabs(['Compact','Normal','Wide'], z=>{ px = z==='Compact'?6:z==='Wide'?14:9; draw(); }, 'Normal'));
+draw();
+</script>

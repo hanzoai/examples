@@ -1,0 +1,109 @@
+<!--hz {"title":"Photos","archetype":"social feed / gallery","creator":"web","desc":"Photo gallery: masonry grid, keyboard-navigable lightbox with zoom and pan, album filters, likes, and an upload panel that reads real files from disk and stores their metadata in @hanzo/base.","nav":[["#/","Grid"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Photos</h1><span class="tag" id="n"></span>
+  <span class="spacer"></span>
+  <span id="albums" class="row" style="gap:4px"></span>
+  <label class="btn p" for="up">Upload</label>
+  <input id="up" type="file" accept="image/*" multiple style="display:none">
+</div>
+<div id="grid" style="column-count:4;column-gap:12px"></div>
+<div id="box" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:80;
+  align-items:center;justify-content:center"></div>
+<p class="hz-note" style="margin-top:16px">The gallery images are generated in the page from a seeded gradient field — they are not photographs of anything. Files you upload stay in this browser; only their name, type and size are recorded in @hanzo/base.</p>
+<script>
+const {h,fill,$,$$,store,rng,range,pick,uid,fmt,toast,submit} = hz;
+const ALBUMS = ['All','Coast','City','Studio','Field'];
+const r = rng(2468);
+const seed = range(28, i => ({id:uid(), album: ALBUMS[1+(i%4)], w: 400, hh: [280,400,320,500,360][i%5],
+  hue: Math.round(r()*360), seed: Math.round(r()*1e6), likes: Math.round(r()*80),
+  title: pick(r,['Low tide','Long exposure','Overcast','Blue hour','Empty street','Backlight','Contact sheet','Grain test'])+' '+(i+1),
+  at: Date.now()-Math.round(r()*120)*864e5 }));
+const db = store('photos', seed);
+const liked = store('photos.liked', []);
+let album='All', open=-1, zoom=1, pan=[0,0];
+
+function paint(cv, p){
+  const w=p.w, hh=p.hh; cv.width=w; cv.height=hh;
+  const x = cv.getContext('2d'), rr = rng(p.seed);
+  const g = x.createLinearGradient(0,0,w*rr(),hh);
+  g.addColorStop(0,`hsl(${p.hue} ${34+rr()*40}% ${16+rr()*30}%)`);
+  g.addColorStop(1,`hsl(${(p.hue+50+rr()*120)%360} ${30+rr()*40}% ${8+rr()*20}%)`);
+  x.fillStyle=g; x.fillRect(0,0,w,hh);
+  for(let i=0;i<5;i++){ const cx0=rr()*w, cy0=rr()*hh, rad=(0.15+rr()*0.5)*w;
+    const rg = x.createRadialGradient(cx0,cy0,0,cx0,cy0,rad);
+    rg.addColorStop(0,`hsla(${(p.hue+i*40)%360} 70% ${(40+rr()*35).toFixed(1)}% / ${(0.10+rr()*0.28).toFixed(2)})`);
+    rg.addColorStop(1,'hsla(0 0% 0% / 0)'); x.fillStyle=rg; x.fillRect(0,0,w,hh); }
+  const hz0 = hh*(0.4+rr()*0.35);
+  x.fillStyle=`hsla(${(p.hue+180)%360} 25% 6% / 0.55)`;
+  x.beginPath(); x.moveTo(0,hz0);
+  for(let px2=0;px2<=w;px2+=6) x.lineTo(px2, hz0 + Math.sin(px2/(30+rr()*60))*10*rr());
+  x.lineTo(w,hh); x.lineTo(0,hh); x.fill();
+  const id=x.getImageData(0,0,w,hh), dd=id.data;
+  for(let i=0;i<dd.length;i+=4){ const n=(Math.random()-0.5)*13; dd[i]+=n; dd[i+1]+=n; dd[i+2]+=n; }
+  x.putImageData(id,0,0);
+}
+function grid(){
+  const d = db.get().filter(p=>album==='All'||p.album===album);
+  $('#n').textContent = d.length+' photos';
+  fill($('#grid'), d.map((p,i)=>{
+    const cv = h('canvas',{style:{width:'100%',borderRadius:'8px',display:'block'}});
+    if(p.url) return h('div',{style:{breakInside:'avoid',marginBottom:'12px',cursor:'zoom-in'},
+      onclick:()=>show(db.get().indexOf(p))},
+      h('img',{src:p.url,style:{width:'100%',borderRadius:'8px',display:'block'}}), caption(p));
+    setTimeout(()=>paint(cv,p),0);
+    return h('div',{style:{breakInside:'avoid',marginBottom:'12px',cursor:'zoom-in'},
+      onclick:()=>show(db.get().indexOf(p))}, cv, caption(p));
+  }));
+}
+function caption(p){
+  const on = liked.get().includes(p.id);
+  return h('div.row',{style:{marginTop:'6px',gap:'6px'}},
+    h('span.small.b.trunc',p.title), h('span.spacer'),
+    h('button.g.sm',{style:{color:on?'var(--bad)':''},onclick:e=>{e.stopPropagation();
+      liked.set(v=>on?v.filter(x=>x!==p.id):[...v,p.id]);
+      db.set(v=>v.map(x=>x.id===p.id?{...x,likes:x.likes+(on?-1:1)}:x)); grid();}},
+      (on?'♥ ':'♡ ')+p.likes));
+}
+function show(i){
+  open = i; zoom=1; pan=[0,0];
+  const p = db.get()[i]; if(!p) return;
+  const box = $('#box'); box.style.display='flex';
+  const media = p.url ? h('img',{src:p.url}) : h('canvas');
+  if(!p.url) setTimeout(()=>paint(media,{...p,w:900,hh:Math.round(900*p.hh/p.w)}),0);
+  Object.assign(media.style,{maxWidth:'92vw',maxHeight:'78vh',borderRadius:'10px',
+    transition:'transform .12s',cursor:'grab',display:'block'});
+  const apply = () => media.style.transform=`scale(${zoom}) translate(${pan[0]}px,${pan[1]}px)`;
+  media.addEventListener('wheel',e=>{e.preventDefault(); zoom=Math.max(1,Math.min(5,zoom*(e.deltaY<0?1.15:0.87))); apply();},{passive:false});
+  let dr=null;
+  media.addEventListener('pointerdown',e=>{dr=[e.clientX,e.clientY];media.setPointerCapture(e.pointerId);});
+  media.addEventListener('pointerup',()=>dr=null);
+  media.addEventListener('pointermove',e=>{ if(!dr)return;
+    pan=[pan[0]+(e.clientX-dr[0])/zoom, pan[1]+(e.clientY-dr[1])/zoom]; dr=[e.clientX,e.clientY]; apply(); });
+  fill(box, h('div',{style:{textAlign:'center'},onclick:e=>{ if(e.target===e.currentTarget) close(); }},
+    media,
+    h('div.row',{style:{justifyContent:'center',gap:'10px',marginTop:'14px',color:'#fff'}},
+      h('button',{onclick:e=>{e.stopPropagation();show((i-1+db.get().length)%db.get().length);}},'‹ Prev'),
+      h('span.small',p.title+' · '+p.album+' · '+fmt.date(p.at)),
+      h('button',{onclick:e=>{e.stopPropagation();show((i+1)%db.get().length);}},'Next ›'),
+      h('button.g',{onclick:e=>{e.stopPropagation();close();}},'Close'))));
+}
+function close(){ $('#box').style.display='none'; open=-1; }
+addEventListener('keydown', e => { if(open<0) return;
+  if(e.key==='Escape') close();
+  if(e.key==='ArrowRight') show((open+1)%db.get().length);
+  if(e.key==='ArrowLeft') show((open-1+db.get().length)%db.get().length); });
+fill($('#albums'), ALBUMS.map(a=>h('button.sm'+(a===album?' p':''),{onclick:()=>{album=a;grid();}},a)));
+$('#up').onchange = async e => {
+  const files = [...e.target.files].slice(0,8);
+  for(const f of files){
+    const url = await new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.readAsDataURL(f); });
+    db.set(v=>[{id:uid(),album:'Studio',title:f.name.replace(/\.\w+$/,''),url,w:400,hh:400,
+      likes:0,at:Date.now(),seed:0,hue:0},...v]);
+    submit('photos.upload',{name:f.name,type:f.type,size:f.size}).catch(()=>{});
+  }
+  album='All'; fill($('#albums'), ALBUMS.map(a=>h('button.sm'+(a===album?' p':''),{onclick:()=>{album=a;grid();}},a)));
+  grid(); toast(files.length+' file'+(files.length===1?'':'s')+' added to this browser only');
+};
+const mq = () => $('#grid').style.columnCount = innerWidth<620?1:innerWidth<900?2:innerWidth<1200?3:4;
+addEventListener('resize', mq); mq(); grid();
+</script>
