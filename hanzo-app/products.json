@@ -1,0 +1,1712 @@
+{
+ "products": [
+  {
+   "slug": "northgate",
+   "name": "Northgate",
+   "tagline": "The admin console for the tables nobody else will look after.",
+   "hue": 214,
+   "mark": "N",
+   "agent": "atlas",
+   "template": "metrics",
+   "archetype": "admin / CRUD",
+   "nav": [
+    [
+     "#/",
+     "Users"
+    ],
+    [
+     "#/roles",
+     "Roles"
+    ],
+    [
+     "#/audit",
+     "Audit"
+    ]
+   ],
+   "desc": "Back-office admin: user CRUD with roles and status, bulk actions, role matrix and an append-only audit trail."
+  },
+  {
+   "slug": "cog",
+   "name": "Cog",
+   "tagline": "An agent that shows its work: every tool call, argument and result, in order.",
+   "hue": 268,
+   "mark": "C",
+   "agent": "sage",
+   "template": "synapse",
+   "archetype": "AI agent / tool use",
+   "nav": [
+    [
+     "#/",
+     "Run"
+    ],
+    [
+     "#/tools",
+     "Tools"
+    ]
+   ],
+   "desc": "Agent run inspector: a planner decomposes a goal into steps, calls real in-page tools (HTTP fetch, calculator, clock, Base write), and streams a transcript with per-step arguments, results, timing and token accounting."
+  },
+  {
+   "slug": "almanac",
+   "name": "Almanac",
+   "tagline": "API reference that a human can read and a machine can check.",
+   "hue": 44,
+   "mark": "A",
+   "agent": "muse",
+   "template": "changelog",
+   "archetype": "docs site / API reference",
+   "nav": [
+    [
+     "#/",
+     "Reference"
+    ]
+   ],
+   "desc": "API reference with a working try-it console: endpoint list, parameter tables, request builder, real fetch against this site's own Base endpoint, and generated curl/JS snippets."
+  },
+  {
+   "slug": "skirmish",
+   "name": "Skirmish",
+   "tagline": "Two-minute multiplayer matches in a browser tab. No install, no lobby.",
+   "hue": 320,
+   "mark": "S",
+   "agent": "echo",
+   "template": "kart-racer",
+   "archetype": "realtime multiplayer game",
+   "nav": [
+    [
+     "#/",
+     "Play"
+    ]
+   ],
+   "desc": "Top-down multiplayer arena: every open tab is a live player over BroadcastChannel \u2014 movement, collision, orb collection, a shared scoreboard and a 90-second round timer."
+  },
+  {
+   "slug": "footnote",
+   "name": "Footnote",
+   "tagline": "Ask your documentation a question and get the paragraph it came from.",
+   "hue": 268,
+   "mark": "F",
+   "agent": "sage",
+   "template": "synapse",
+   "archetype": "AI chat / RAG over docs",
+   "nav": [
+    [
+     "#/",
+     "Chat"
+    ]
+   ],
+   "desc": "Retrieval-augmented chat over a small bundled document set: TF-IDF retrieval in the browser, cited passages, streaming answer composition."
+  },
+  {
+   "slug": "halcyon",
+   "name": "Halcyon",
+   "tagline": "A calm assistant: streaming answers, threads that persist, nothing that shouts.",
+   "hue": 268,
+   "mark": "H",
+   "agent": "sage",
+   "template": "synapse",
+   "archetype": "AI chat app",
+   "nav": [
+    [
+     "#/",
+     "Chat"
+    ]
+   ],
+   "desc": "Assistant chat shell: multi-conversation sidebar, streaming token rendering, markdown and code blocks with copy, stop generation, regenerate, model and temperature controls and message export."
+  },
+  {
+   "slug": "timeslot",
+   "name": "Timeslot",
+   "tagline": "Pick a slot. That is the whole product, and it is harder than it looks.",
+   "hue": 214,
+   "mark": "T",
+   "agent": "nomad",
+   "template": "deploy",
+   "archetype": "booking / scheduling",
+   "nav": [
+    [
+     "#/",
+     "Book"
+    ],
+    [
+     "#/mine",
+     "My bookings"
+    ]
+   ],
+   "desc": "Appointment booking: month calendar, per-day availability from working hours minus existing bookings, timezone display and a confirm step written to @hanzo/base."
+  },
+  {
+   "slug": "pennyworth",
+   "name": "Pennyworth",
+   "tagline": "Household budgeting for people who want the envelope back.",
+   "hue": 8,
+   "mark": "P",
+   "agent": "juno",
+   "template": "analytics-dashboard",
+   "archetype": "personal finance",
+   "nav": [
+    [
+     "#/",
+     "Overview"
+    ],
+    [
+     "#/tx",
+     "Transactions"
+    ],
+    [
+     "#/envelopes",
+     "Envelopes"
+    ]
+   ],
+   "desc": "Personal budgeting: an envelope allocator that must balance, transactions with auto-categorisation rules, month-over-month spend chart, savings-rate calculation and a runway projection."
+  },
+  {
+   "slug": "tender",
+   "name": "Tender",
+   "tagline": "A checkout that says the total once and never changes it.",
+   "hue": 8,
+   "mark": "T",
+   "agent": "juno",
+   "template": "ecommerce-storefront",
+   "archetype": "ecommerce checkout",
+   "nav": [
+    [
+     "#/",
+     "Checkout"
+    ]
+   ],
+   "desc": "Multi-step checkout: cart review, address with real validation, shipping options that change the total, an order summary with promo codes, and a confirmation written to @hanzo/base."
+  },
+  {
+   "slug": "quill",
+   "name": "Quill",
+   "tagline": "Model the content, then edit it. Fields first, WYSIWYG second.",
+   "hue": 44,
+   "mark": "Q",
+   "agent": "muse",
+   "template": "blog-platform",
+   "archetype": "CMS / content modelling",
+   "nav": [
+    [
+     "#/",
+     "Entries"
+    ],
+    [
+     "#/model",
+     "Content model"
+    ],
+    [
+     "#/api",
+     "API preview"
+    ]
+   ],
+   "desc": "Headless CMS admin: define content types and their fields, create entries against those types with generated forms, manage draft/published state, localise, and preview the JSON an API would return."
+  },
+  {
+   "slug": "scribe",
+   "name": "Scribe",
+   "tagline": "One document, several cursors, no merge conflicts.",
+   "hue": 178,
+   "mark": "S",
+   "agent": "echo",
+   "template": "markdown-editor",
+   "archetype": "collaborative editor",
+   "nav": [
+    [
+     "#/",
+     "Editor"
+    ]
+   ],
+   "desc": "Multi-peer document editor: text syncs live across every tab over BroadcastChannel with remote cursors and presence, plus word count, outline and version snapshots."
+  },
+  {
+   "slug": "helm",
+   "name": "Helm",
+   "tagline": "The SaaS dashboard you can hand to a customer on day one.",
+   "hue": 214,
+   "mark": "H",
+   "agent": "atlas",
+   "template": "analytics-dashboard",
+   "archetype": "SaaS dashboard",
+   "nav": [
+    [
+     "#/",
+     "Usage"
+    ],
+    [
+     "#/billing",
+     "Billing"
+    ],
+    [
+     "#/keys",
+     "API keys"
+    ],
+    [
+     "#/team",
+     "Team"
+    ],
+    [
+     "#/webhooks",
+     "Webhooks"
+    ]
+   ],
+   "desc": "Product console: usage against plan limits with projections, invoice history, API keys with reveal/rotate, team seats and a webhook log."
+  },
+  {
+   "slug": "kith",
+   "name": "Kith",
+   "tagline": "Everyone you know, and the last thing you said to them.",
+   "hue": 214,
+   "mark": "K",
+   "agent": "atlas",
+   "template": "beta",
+   "archetype": "CRM / address book",
+   "nav": [
+    [
+     "#/",
+     "Contacts"
+    ],
+    [
+     "#/dupes",
+     "Duplicates"
+    ],
+    [
+     "#/import",
+     "Import"
+    ]
+   ],
+   "desc": "Address book: alphabetical index, detail pane, tag segments, CSV import and export, and a duplicate finder that scores name and email similarity."
+  },
+  {
+   "slug": "syllabus",
+   "name": "Syllabus",
+   "tagline": "Lessons, progress and a certificate at the end. Learning, not a video wall.",
+   "hue": 44,
+   "mark": "S",
+   "agent": "muse",
+   "template": "blog-platform",
+   "archetype": "learning platform (LMS)",
+   "nav": [
+    [
+     "#/",
+     "Course"
+    ],
+    [
+     "#/progress",
+     "Progress"
+    ]
+   ],
+   "desc": "Course player: module outline with completion state, lesson reader, an inline quiz that grades and explains, progress persistence and a certificate view once every module is complete."
+  },
+  {
+   "slug": "relay",
+   "name": "Relay",
+   "tagline": "A pipeline you can actually move deals through with one hand.",
+   "hue": 214,
+   "mark": "R",
+   "agent": "atlas",
+   "template": "beta",
+   "archetype": "CRM",
+   "nav": [
+    [
+     "#/",
+     "Pipeline"
+    ],
+    [
+     "#/accounts",
+     "Accounts"
+    ],
+    [
+     "#/forecast",
+     "Forecast"
+    ]
+   ],
+   "desc": "Sales CRM: deal pipeline by stage, weighted forecast, account list and an activity timeline. New notes persist to @hanzo/base."
+  },
+  {
+   "slug": "podium",
+   "name": "Podium",
+   "tagline": "Slides in the browser. Present, or send the link and let them read it.",
+   "hue": 28,
+   "mark": "P",
+   "agent": "solaris",
+   "template": "mosaic",
+   "archetype": "presentation / slides",
+   "nav": [
+    [
+     "#/",
+     "Present"
+    ],
+    [
+     "#/edit",
+     "Edit"
+    ]
+   ],
+   "desc": "Presentation deck: markdown-authored slides, keyboard and touch navigation, speaker notes, a thumbnail overview grid, progress bar, presenter timer and full-screen presentation mode."
+  },
+  {
+   "slug": "redline",
+   "name": "Redline",
+   "tagline": "Code review as a reading experience: the diff, the reason, the decision.",
+   "hue": 152,
+   "mark": "R",
+   "agent": "delta",
+   "template": "metrics",
+   "archetype": "devtool / code review",
+   "nav": [
+    [
+     "#/",
+     "Review"
+    ]
+   ],
+   "desc": "Code review tool: a real line-level diff engine (LCS) over two revisions, unified and split views, per-line comments, review state, file tree with per-file statistics and a patch export."
+  },
+  {
+   "slug": "sluice",
+   "name": "Sluice",
+   "tagline": "Move data from where it is to where it is useful, and watch it go.",
+   "hue": 152,
+   "mark": "S",
+   "agent": "delta",
+   "template": "analytics-dashboard",
+   "archetype": "data / ETL tool",
+   "nav": [
+    [
+     "#/",
+     "Pipeline"
+    ]
+   ],
+   "desc": "Visual data pipeline: paste or load CSV, chain real transform steps (filter, map, derive, group, sort, limit), see row counts flow between stages, profile columns and export JSON or CSV."
+  },
+  {
+   "slug": "convene",
+   "name": "Convene",
+   "tagline": "Publish an event, take RSVPs, and know who is actually coming.",
+   "hue": 96,
+   "mark": "C",
+   "agent": "nomad",
+   "template": "circle",
+   "archetype": "booking / events",
+   "nav": [
+    [
+     "#/",
+     "Events"
+    ],
+    [
+     "#/mine",
+     "My tickets"
+    ]
+   ],
+   "desc": "Event listing and registration: month and list views, capacity with a waitlist, ticket tiers, an ICS calendar file generated in the browser and registration written to @hanzo/base."
+  },
+  {
+   "slug": "outlay",
+   "name": "Outlay",
+   "tagline": "Receipts in, reimbursement out, with the approval in between.",
+   "hue": 8,
+   "mark": "O",
+   "agent": "juno",
+   "template": "analytics-dashboard",
+   "archetype": "finance / expense tracking",
+   "nav": [
+    [
+     "#/",
+     "My claims"
+    ],
+    [
+     "#/approve",
+     "Approvals"
+    ],
+    [
+     "#/budget",
+     "Budgets"
+    ]
+   ],
+   "desc": "Expense reports: submit a claim with a real file attachment, policy checks that flag violations, an approver queue, per-category budget burn-down and CSV export."
+  },
+  {
+   "slug": "current",
+   "name": "Current",
+   "tagline": "A feed with a reading position, because you have a life.",
+   "hue": 28,
+   "mark": "C",
+   "agent": "solaris",
+   "template": "circle",
+   "archetype": "social feed",
+   "nav": [
+    [
+     "#/",
+     "Home"
+    ],
+    [
+     "#/likes",
+     "Liked"
+    ]
+   ],
+   "desc": "Social timeline: composer with character budget, like/repost/reply counters, threaded replies, follow suggestions and an infinite-scroll feed."
+  },
+  {
+   "slug": "chorus",
+   "name": "Chorus",
+   "tagline": "Let the people who use it tell you what to build next, and count the votes.",
+   "hue": 28,
+   "mark": "C",
+   "agent": "solaris",
+   "template": "deploy",
+   "archetype": "feature voting board",
+   "nav": [
+    [
+     "#/",
+     "Ideas"
+    ],
+    [
+     "#/shipped",
+     "Shipped"
+    ],
+    [
+     "#/new",
+     "Submit"
+    ]
+   ],
+   "desc": "Public roadmap and feature-voting board: submit an idea, vote once per idea, filter by status and board, comment threads, and a changelog of what shipped \u2014 all persisted to @hanzo/base."
+  },
+  {
+   "slug": "bellwether",
+   "name": "Bellwether",
+   "tagline": "Ship it to one percent first. Feature flags with a blast radius.",
+   "hue": 152,
+   "mark": "B",
+   "agent": "delta",
+   "template": "metrics",
+   "archetype": "devtool / feature flags",
+   "nav": [
+    [
+     "#/",
+     "Flags"
+    ],
+    [
+     "#/simulate",
+     "Simulator"
+    ],
+    [
+     "#/audit",
+     "Audit"
+    ]
+   ],
+   "desc": "Feature-flag console: boolean and multivariate flags, percentage rollouts evaluated by a real hash bucketing function, targeting rules, an evaluation simulator over synthetic users and an audit trail."
+  },
+  {
+   "slug": "armada",
+   "name": "Armada",
+   "tagline": "Every machine you run, on one screen, sorted by how worried you should be.",
+   "hue": 200,
+   "mark": "A",
+   "agent": "kestrel",
+   "template": "analytics-dashboard",
+   "archetype": "infrastructure monitoring",
+   "nav": [
+    [
+     "#/",
+     "Nodes"
+    ],
+    [
+     "#/alerts",
+     "Alerts"
+    ],
+    [
+     "#/logs",
+     "Logs"
+    ]
+   ],
+   "desc": "Live fleet monitor: node table with rolling CPU/memory/latency, a streaming request meter that updates every second, alert rules that fire and clear, and a log tail with severity filter."
+  },
+  {
+   "slug": "conduit",
+   "name": "Conduit",
+   "tagline": "Wire steps together and watch the data flow through the graph.",
+   "hue": 214,
+   "mark": "C",
+   "agent": "atlas",
+   "template": "matrix",
+   "archetype": "node graph editor / automation",
+   "nav": [
+    [
+     "#/",
+     "Canvas"
+    ]
+   ],
+   "desc": "Visual automation builder: draggable nodes wired by bezier edges, a real topological execution engine that runs the graph and shows each node's output, plus cycle detection and JSON export."
+  },
+  {
+   "slug": "atelier",
+   "name": "Atelier",
+   "tagline": "A portfolio that gets out of the way of the work.",
+   "hue": 28,
+   "mark": "A",
+   "agent": "solaris",
+   "template": "kinetic",
+   "archetype": "portfolio",
+   "nav": [
+    [
+     "#/",
+     "Work"
+    ],
+    [
+     "#/about",
+     "About"
+    ],
+    [
+     "#/contact",
+     "Contact"
+    ]
+   ],
+   "desc": "Designer/engineer portfolio: animated hero, filterable project grid, case-study detail, skills bars, timeline and a contact form on @hanzo/base."
+  },
+  {
+   "slug": "fieldwork",
+   "name": "Fieldwork",
+   "tagline": "Build the form, take the answers, keep the answers.",
+   "hue": 214,
+   "mark": "F",
+   "agent": "atlas",
+   "template": "deploy",
+   "archetype": "form builder",
+   "nav": [
+    [
+     "#/",
+     "Build"
+    ],
+    [
+     "#/preview",
+     "Preview"
+    ],
+    [
+     "#/responses",
+     "Responses"
+    ]
+   ],
+   "desc": "Form builder: drag fields into a form, configure validation and conditional logic, preview the live form, collect real responses into @hanzo/base and read them back in a response table."
+  },
+  {
+   "slug": "commons",
+   "name": "Commons",
+   "tagline": "A place to argue in public and still be able to find the thread tomorrow.",
+   "hue": 28,
+   "mark": "C",
+   "agent": "solaris",
+   "template": "circle",
+   "archetype": "forum / community",
+   "nav": [
+    [
+     "#/",
+     "Threads"
+    ],
+    [
+     "#/new",
+     "New thread"
+    ]
+   ],
+   "desc": "Discussion forum: categories, thread list with vote ranking, nested replies, tag filter and a new-thread composer backed by @hanzo/base."
+  },
+  {
+   "slug": "meridian",
+   "name": "Meridian",
+   "tagline": "The whole planet at sixty frames a second, with your data on it.",
+   "hue": 320,
+   "mark": "M",
+   "agent": "iris",
+   "template": "three-webgpu",
+   "archetype": "WebGL / 3D",
+   "nav": [
+    [
+     "#/",
+     "Globe"
+    ]
+   ],
+   "desc": "Interactive 3D globe: raymarched sphere with procedural continents, plotted points of presence, great-circle arcs between regions and an inertial drag/zoom camera."
+  },
+  {
+   "slug": "streaks",
+   "name": "Streaks",
+   "tagline": "Do the thing. Mark the box. Do not break the chain.",
+   "hue": 214,
+   "mark": "S",
+   "agent": "atlas",
+   "template": "deploy",
+   "archetype": "habit tracker",
+   "nav": [
+    [
+     "#/",
+     "Habits"
+    ],
+    [
+     "#/stats",
+     "Statistics"
+    ]
+   ],
+   "desc": "Habit tracker: a 26-week contribution heatmap per habit, current and longest streak, weekday completion profile, goal targets and per-day notes stored in @hanzo/base."
+  },
+  {
+   "slug": "vellum",
+   "name": "Vellum",
+   "tagline": "The company handbook, written to be read rather than filed.",
+   "hue": 44,
+   "mark": "V",
+   "agent": "muse",
+   "template": "serif",
+   "archetype": "docs site",
+   "nav": [
+    [
+     "#/",
+     "Docs"
+    ]
+   ],
+   "desc": "Documentation site: sidebar navigation, on-page table of contents with scroll spy, client-side search with keyboard navigation, copyable code blocks and prev/next paging."
+  },
+  {
+   "slug": "deskline",
+   "name": "Deskline",
+   "tagline": "Tickets in, answers out, with a queue that tells the truth.",
+   "hue": 214,
+   "mark": "D",
+   "agent": "atlas",
+   "template": "beta",
+   "archetype": "helpdesk / ticketing",
+   "nav": [
+    [
+     "#/",
+     "Queue"
+    ],
+    [
+     "#/agents",
+     "Agents"
+    ]
+   ],
+   "desc": "Support desk: ticket queue with priority and SLA countdown, conversation thread, canned replies and per-agent load."
+  },
+  {
+   "slug": "polyglot",
+   "name": "Polyglot",
+   "tagline": "Every string, every locale, and the ones nobody translated yet.",
+   "hue": 152,
+   "mark": "P",
+   "agent": "delta",
+   "template": "metrics",
+   "archetype": "devtool / localisation",
+   "nav": [
+    [
+     "#/",
+     "Catalogue"
+    ],
+    [
+     "#/health",
+     "Health"
+    ],
+    [
+     "#/export",
+     "Export"
+    ]
+   ],
+   "desc": "Localisation manager: a string catalogue across five locales, completeness and missing-key reporting, ICU plural and interpolation checking, an inline editor and export to JSON, gettext PO or a flat key file."
+  },
+  {
+   "slug": "daydream",
+   "name": "Daydream",
+   "tagline": "Describe it, generate it, keep the good ones, and keep the prompt.",
+   "hue": 268,
+   "mark": "D",
+   "agent": "sage",
+   "template": "synapse",
+   "archetype": "image generation UI",
+   "nav": [
+    [
+     "#/",
+     "Studio"
+    ],
+    [
+     "#/gallery",
+     "Gallery"
+    ]
+   ],
+   "desc": "Generation studio interface: prompt and negative prompt, model and sampler controls, seed locking, aspect ratios, a batch queue with progress, and a gallery \u2014 with images synthesised in-page from the prompt hash."
+  },
+  {
+   "slug": "courier",
+   "name": "Courier",
+   "tagline": "Messages that arrive while you are looking at them.",
+   "hue": 178,
+   "mark": "C",
+   "agent": "echo",
+   "template": "circle",
+   "archetype": "chat / messaging",
+   "nav": [
+    [
+     "#/",
+     "Messages"
+    ]
+   ],
+   "desc": "Team messenger: channel and DM list, threaded message view, typing indicator, unread badges, emoji reactions and slash commands."
+  },
+  {
+   "slug": "stockroom",
+   "name": "Stockroom",
+   "tagline": "What you have, where it is, and how long before you run out.",
+   "hue": 8,
+   "mark": "S",
+   "agent": "juno",
+   "template": "unity",
+   "archetype": "inventory",
+   "nav": [
+    [
+     "#/",
+     "Stock"
+    ],
+    [
+     "#/moves",
+     "Movements"
+    ],
+    [
+     "#/reorder",
+     "Reorder"
+    ]
+   ],
+   "desc": "Inventory control: stock on hand across locations, reorder points, stock movements ledger and a receive/issue form backed by @hanzo/base."
+  },
+  {
+   "slug": "remit",
+   "name": "Remit",
+   "tagline": "Line items in, PDF out, paid or not paid \u2014 nothing else.",
+   "hue": 8,
+   "mark": "R",
+   "agent": "juno",
+   "template": "unity",
+   "archetype": "finance / document builder",
+   "nav": [
+    [
+     "#/",
+     "Builder"
+    ],
+    [
+     "#/list",
+     "Invoices"
+    ]
+   ],
+   "desc": "Invoice builder: editable line items with quantity and rate, tax and discount rules, multi-currency, a print-ready A4 preview that really prints, and a saved-invoice list in @hanzo/base."
+  },
+  {
+   "slug": "shortlist",
+   "name": "Shortlist",
+   "tagline": "A job board that respects the applicant's afternoon.",
+   "hue": 28,
+   "mark": "S",
+   "agent": "solaris",
+   "template": "jobfinder",
+   "archetype": "job board",
+   "nav": [
+    [
+     "#/",
+     "Roles"
+    ],
+    [
+     "#/saved",
+     "Saved"
+    ]
+   ],
+   "desc": "Job board: faceted search over roles, salary-band filter, detail pages with structured requirements, saved roles, and an application form with file attachment written to @hanzo/base."
+  },
+  {
+   "slug": "longform",
+   "name": "Longform",
+   "tagline": "Publishing for people with something long to say.",
+   "hue": 44,
+   "mark": "L",
+   "agent": "muse",
+   "template": "blog-platform",
+   "archetype": "blog / CMS",
+   "nav": [
+    [
+     "#/",
+     "Posts"
+    ],
+    [
+     "#/write",
+     "Write"
+    ]
+   ],
+   "desc": "Blog with an editing surface: post list, reading view with estimated read time, tag filter, live markdown-ish editor with preview, draft/publish state and a newsletter form on @hanzo/base.",
+   "derive": {
+    "repo": "blog-platform",
+    "replace": [
+     [
+      "Hanzo Blog",
+      "Longform"
+     ],
+     [
+      "Sarah Chen",
+      "Ada L"
+     ],
+     [
+      "Alex Rivera",
+      "Grace H"
+     ],
+     [
+      "Jordan Park",
+      "Linus T"
+     ],
+     [
+      "Senior Developer Advocate",
+      "Writes about systems that outlive their authors"
+     ],
+     [
+      "Design Systems at Scale",
+      "What a design system owes its readers"
+     ]
+    ]
+   }
+  },
+  {
+   "slug": "sift",
+   "name": "Sift",
+   "tagline": "Paste the JSON. Find the field. Copy the path. Get on with it.",
+   "hue": 152,
+   "mark": "S",
+   "agent": "delta",
+   "template": "metrics",
+   "archetype": "devtool",
+   "nav": [
+    [
+     "#/",
+     "Explore"
+    ]
+   ],
+   "desc": "JSON workbench: collapsible tree, JSONPath-style query, structural diff between two documents, schema inference, minify/format and byte accounting."
+  },
+  {
+   "slug": "lanes",
+   "name": "Lanes",
+   "tagline": "A board with WIP limits that mean something, because they stop you.",
+   "hue": 214,
+   "mark": "L",
+   "agent": "atlas",
+   "template": "kanban-board",
+   "archetype": "kanban / project management",
+   "nav": [
+    [
+     "#/",
+     "Board"
+    ]
+   ],
+   "desc": "Drag-and-drop kanban board with columns, labels, assignees, WIP limits and a card editor. State persists locally; new cards also post to @hanzo/base.",
+   "derive": {
+    "repo": "kanban-board",
+    "replace": [
+     [
+      "Project Board",
+      "Lanes"
+     ],
+     [
+      "Implement user authentication",
+      "Ship release retention GC"
+     ],
+     [
+      "Add login/logout functionality using @hanzo/ui forms",
+      "Prune releases past the keep window; activate verifies bytes first"
+     ],
+     [
+      "Design dashboard layout",
+      "Rate-limit anonymous submissions"
+     ],
+     [
+      "Create responsive dashboard using @hanzo/ui components",
+      "Per-IP token bucket in front of the public Base collection"
+     ],
+     [
+      "Sarah Chen",
+      "Ada L"
+     ],
+     [
+      "Alex Rivera",
+      "Grace H"
+     ],
+     [
+      "Jordan Park",
+      "Linus T"
+     ],
+     [
+      "Emily Davis",
+      "Barbara L"
+     ],
+     [
+      "Michael Kim",
+      "Ken T"
+     ]
+    ]
+   }
+  },
+  {
+   "slug": "cartograph",
+   "name": "Cartograph",
+   "tagline": "Points, routes and regions on a map you can actually read.",
+   "hue": 96,
+   "mark": "C",
+   "agent": "nomad",
+   "template": "three-webgpu",
+   "archetype": "maps / geospatial",
+   "nav": [
+    [
+     "#/",
+     "Map"
+    ]
+   ],
+   "desc": "Canvas map: an equirectangular world drawn from vector coastlines, pan and zoom, clustered markers that split as you zoom in, great-circle route measurement in kilometres and a location search."
+  },
+  {
+   "slug": "bazaar",
+   "name": "Bazaar",
+   "tagline": "A marketplace with two sides and one set of rules.",
+   "hue": 8,
+   "mark": "B",
+   "agent": "juno",
+   "template": "ecommerce-storefront",
+   "archetype": "marketplace",
+   "nav": [
+    [
+     "#/",
+     "Browse"
+    ],
+    [
+     "#/sell",
+     "Sell"
+    ],
+    [
+     "#/offers",
+     "My offers"
+    ]
+   ],
+   "desc": "Two-sided marketplace: seller listings with facets and map-free geo filter, offer flow, seller pages and a create-listing form backed by @hanzo/base.",
+   "derive": {
+    "repo": "ecommerce-storefront",
+    "replace": [
+     [
+      ">Store<",
+      ">Bazaar<"
+     ],
+     [
+      "Premium Wireless Headphones",
+      "Field Recorder"
+     ],
+     [
+      "Smart Watch Pro",
+      "Pocket Barometer"
+     ],
+     [
+      "Portable Speaker",
+      "Shortwave Radio"
+     ],
+     [
+      "Laptop Stand",
+      "Folding Desk Stand"
+     ]
+    ]
+   }
+  },
+  {
+   "slug": "roundtable",
+   "name": "Roundtable",
+   "tagline": "A call that starts when you open the link.",
+   "hue": 178,
+   "mark": "R",
+   "agent": "echo",
+   "template": "circle",
+   "archetype": "realtime video (WebRTC)",
+   "nav": [
+    [
+     "#/",
+     "Call"
+    ]
+   ],
+   "desc": "WebRTC demonstration: real camera capture, a real RTCPeerConnection with live ICE/connection state, mute and camera toggles, device picker and live bitrate stats read from getStats()."
+  },
+  {
+   "slug": "bistro",
+   "name": "Bistro",
+   "tagline": "The menu, the table, the order. Nobody downloads an app to eat.",
+   "hue": 8,
+   "mark": "B",
+   "agent": "juno",
+   "template": "savor",
+   "archetype": "ecommerce / table ordering",
+   "nav": [
+    [
+     "#/",
+     "Menu"
+    ],
+    [
+     "#/tab",
+     "Your tab"
+    ],
+    [
+     "#/split",
+     "Split the bill"
+    ]
+   ],
+   "desc": "Restaurant table ordering: QR-style table code, menu by course with dietary filters and modifiers, a running tab, split-bill calculator with tip, and the order sent to @hanzo/base."
+  },
+  {
+   "slug": "marginalia",
+   "name": "Marginalia",
+   "tagline": "Notes that link to each other, and a backlink panel that earns its space.",
+   "hue": 44,
+   "mark": "M",
+   "agent": "muse",
+   "template": "markdown-editor",
+   "archetype": "notes / knowledge base",
+   "nav": [
+    [
+     "#/",
+     "Notes"
+    ],
+    [
+     "#/graph",
+     "Graph"
+    ]
+   ],
+   "desc": "Note taking with wiki links: markdown editor with live preview, [[backlinks]] resolved across notes, full-text search with ranking, tags, pinning and a graph view of connections.",
+   "derive": {
+    "repo": "markdown-editor",
+    "replace": [
+     [
+      "Markdown Editor",
+      "Marginalia"
+     ],
+     [
+      "Edit Only",
+      "Write"
+     ],
+     [
+      "Split View",
+      "Side by side"
+     ],
+     [
+      "Preview Only",
+      "Read"
+     ]
+    ]
+   }
+  },
+  {
+   "slug": "threshold",
+   "name": "Threshold",
+   "tagline": "The first five minutes of an account, designed like they matter.",
+   "hue": 214,
+   "mark": "T",
+   "agent": "atlas",
+   "template": "quantum",
+   "archetype": "auth / onboarding flow",
+   "nav": [
+    [
+     "#/",
+     "Start"
+    ]
+   ],
+   "desc": "Complete account flow: sign up with live password-strength scoring, email verification code, a two-factor step with a real TOTP-style code check, workspace setup wizard and an invite step \u2014 every step written to @hanzo/base."
+  },
+  {
+   "slug": "apogee",
+   "name": "Apogee",
+   "tagline": "Orbital mechanics you can drag with a mouse.",
+   "hue": 320,
+   "mark": "A",
+   "agent": "iris",
+   "template": "three-webgpu",
+   "archetype": "WebGL / 3D",
+   "nav": [
+    [
+     "#/",
+     "Scene"
+    ]
+   ],
+   "desc": "WebGL2 signed-distance-field raymarcher: orbit the camera, change the shape, retune the material and lighting live."
+  },
+  {
+   "slug": "trellis",
+   "name": "Trellis",
+   "tagline": "Who reports to whom, and who is standing on their own.",
+   "hue": 214,
+   "mark": "T",
+   "agent": "atlas",
+   "template": "unity",
+   "archetype": "team directory / org chart",
+   "nav": [
+    [
+     "#/",
+     "Chart"
+    ],
+    [
+     "#/list",
+     "Directory"
+    ]
+   ],
+   "desc": "Team directory with an org chart: a real tree layout computed from reporting lines, expand and collapse, search that highlights a path to the root, per-team headcount and a profile pane."
+  },
+  {
+   "slug": "swarm",
+   "name": "Swarm",
+   "tagline": "A hundred thousand particles obeying three rules.",
+   "hue": 320,
+   "mark": "S",
+   "agent": "iris",
+   "template": "three-webgpu",
+   "archetype": "WebGL / 3D",
+   "nav": [
+    [
+     "#/",
+     "Field"
+    ]
+   ],
+   "desc": "GPU particle field: 200k points integrated in a vertex shader against a curl-like flow, with additive blending, pointer attraction, colour ramps and live counters."
+  },
+  {
+   "slug": "darkroom",
+   "name": "Darkroom",
+   "tagline": "A gallery that gives the photograph the whole screen.",
+   "hue": 28,
+   "mark": "D",
+   "agent": "solaris",
+   "template": "mint",
+   "archetype": "social feed / gallery",
+   "nav": [
+    [
+     "#/",
+     "Grid"
+    ]
+   ],
+   "desc": "Photo gallery: masonry grid, keyboard-navigable lightbox with zoom and pan, album filters, likes, and an upload panel that reads real files from disk and stores their metadata in @hanzo/base."
+  },
+  {
+   "slug": "tessera",
+   "name": "Tessera",
+   "tagline": "A shared canvas where every pixel has an owner and a timestamp.",
+   "hue": 178,
+   "mark": "T",
+   "agent": "echo",
+   "template": "voxel-craft",
+   "archetype": "realtime multiplayer",
+   "nav": [
+    [
+     "#/",
+     "Canvas"
+    ]
+   ],
+   "desc": "Shared pixel canvas: every open tab and window is a live peer over BroadcastChannel \u2014 cursors, placements and chat propagate instantly and the board is shared state."
+  },
+  {
+   "slug": "ballot",
+   "name": "Ballot",
+   "tagline": "Ask the room, and watch the bars move while they answer.",
+   "hue": 152,
+   "mark": "B",
+   "agent": "delta",
+   "template": "deploy",
+   "archetype": "survey / live poll",
+   "nav": [
+    [
+     "#/",
+     "Vote"
+    ],
+    [
+     "#/results",
+     "Results"
+    ],
+    [
+     "#/build",
+     "Build"
+    ]
+   ],
+   "desc": "Live polling and survey builder: multiple question types, a presenter view whose results update instantly across tabs, per-question charts and CSV export of responses."
+  },
+  {
+   "slug": "grimoire",
+   "name": "Grimoire",
+   "tagline": "A prompt library with versions, variables and a diff between them.",
+   "hue": 268,
+   "mark": "G",
+   "agent": "sage",
+   "template": "synapse",
+   "archetype": "AI tooling / prompt library",
+   "nav": [
+    [
+     "#/",
+     "Library"
+    ],
+    [
+     "#/diff",
+     "Diff"
+    ],
+    [
+     "#/evals",
+     "Evals"
+    ]
+   ],
+   "desc": "Prompt library and playground: versioned prompts with variables, a template renderer, a word-level diff between any two versions, token and cost estimates per model, and an evaluation grid."
+  },
+  {
+   "slug": "cadence",
+   "name": "Cadence",
+   "tagline": "The four numbers that matter, above the fold, always.",
+   "hue": 152,
+   "mark": "C",
+   "agent": "delta",
+   "template": "analytics-dashboard",
+   "archetype": "analytics dashboard",
+   "nav": [
+    [
+     "#/",
+     "Overview"
+    ],
+    [
+     "#/funnel",
+     "Funnel"
+    ],
+    [
+     "#/retention",
+     "Retention"
+    ],
+    [
+     "#/sources",
+     "Sources"
+    ]
+   ],
+   "desc": "Product analytics dashboard: time series, funnel, cohort retention and channel mix over synthetic demo data.",
+   "derive": {
+    "repo": "analytics-dashboard",
+    "replace": [
+     [
+      "Analytics Dashboard",
+      "Cadence"
+     ],
+     [
+      "Total Revenue",
+      "Revenue"
+     ],
+     [
+      "Active Now",
+      "Online now"
+     ],
+     [
+      "Olivia Martin",
+      "Ada L"
+     ],
+     [
+      "Jackson Lee",
+      "Grace H"
+     ],
+     [
+      "Isabella Nguyen",
+      "Linus T"
+     ],
+     [
+      "William Kim",
+      "Barbara L"
+     ],
+     [
+      "Sofia Davis",
+      "Ken T"
+     ]
+    ]
+   }
+  },
+  {
+   "slug": "quorum",
+   "name": "Quorum",
+   "tagline": "Questions with accepted answers, and a reason the answer was accepted.",
+   "hue": 28,
+   "mark": "Q",
+   "agent": "solaris",
+   "template": "circle",
+   "archetype": "forum / Q&A",
+   "nav": [
+    [
+     "#/",
+     "Questions"
+    ],
+    [
+     "#/ask",
+     "Ask"
+    ]
+   ],
+   "desc": "Question-and-answer site: ask, answer, vote, accept an answer, tag navigation, unanswered filter and reputation derived from votes."
+  },
+  {
+   "slug": "spool",
+   "name": "Spool",
+   "tagline": "Jobs, retries and the dead-letter queue you have been ignoring.",
+   "hue": 200,
+   "mark": "S",
+   "agent": "kestrel",
+   "template": "metrics",
+   "archetype": "infrastructure / job queue",
+   "nav": [
+    [
+     "#/",
+     "Jobs"
+    ],
+    [
+     "#/dlq",
+     "Dead letters"
+    ],
+    [
+     "#/metrics",
+     "Metrics"
+    ]
+   ],
+   "desc": "Job queue inspector: a live worker pool that really processes synthetic jobs with retries and exponential backoff, a dead-letter queue you can replay, throughput and latency charts, and per-queue depth."
+  },
+  {
+   "slug": "needle",
+   "name": "Needle",
+   "tagline": "Write the pattern, see the match, understand the group.",
+   "hue": 152,
+   "mark": "N",
+   "agent": "delta",
+   "template": "markdown-editor",
+   "archetype": "devtool",
+   "nav": [
+    [
+     "#/",
+     "Tester"
+    ]
+   ],
+   "desc": "Regular expression workbench: live highlighting of every match, named and numbered capture groups, flags, replace preview, a cheatsheet and a library of ready patterns."
+  },
+  {
+   "slug": "milestone",
+   "name": "Milestone",
+   "tagline": "A changelog your users will read, because it is written for them.",
+   "hue": 44,
+   "mark": "M",
+   "agent": "muse",
+   "template": "changelog",
+   "archetype": "changelog / release notes",
+   "nav": [
+    [
+     "#/",
+     "Changelog"
+    ],
+    [
+     "#/feeds",
+     "Feeds"
+    ]
+   ],
+   "desc": "Product changelog: entries grouped by version with typed changes, a filter by change type, RSS and JSON feed generation in the browser, keyboard search and a subscribe form on @hanzo/base."
+  },
+  {
+   "slug": "compass",
+   "name": "Compass",
+   "tagline": "What ships when, and what it is waiting on.",
+   "hue": 214,
+   "mark": "C",
+   "agent": "atlas",
+   "template": "kanban-board",
+   "archetype": "project management / gantt",
+   "nav": [
+    [
+     "#/",
+     "Timeline"
+    ]
+   ],
+   "desc": "Quarterly roadmap: draggable and resizable timeline bars, swimlanes by team, dependency arrows, milestone markers, today line and a critical-path highlight."
+  },
+  {
+   "slug": "peek",
+   "name": "Peek",
+   "tagline": "Share the screen, record the screen, send the file.",
+   "hue": 178,
+   "mark": "P",
+   "agent": "echo",
+   "template": "video-streaming",
+   "archetype": "realtime video / screen capture",
+   "nav": [
+    [
+     "#/",
+     "Capture"
+    ]
+   ],
+   "desc": "Screen capture studio: real getDisplayMedia sharing, live track statistics, picture-in-picture, MediaRecorder capture to a downloadable WebM file and a frame grabber that exports PNG stills."
+  },
+  {
+   "slug": "gridline",
+   "name": "Gridline",
+   "tagline": "A spreadsheet several people can be wrong in at the same time.",
+   "hue": 178,
+   "mark": "G",
+   "agent": "echo",
+   "template": "metrics",
+   "archetype": "collaborative editor / spreadsheet",
+   "nav": [
+    [
+     "#/",
+     "Grid"
+    ]
+   ],
+   "desc": "Spreadsheet with a real formula engine: cell references, ranges, SUM/AVG/MIN/MAX/COUNT/IF, dependency-aware recalculation, cycle detection, keyboard navigation and cross-tab sync."
+  },
+  {
+   "slug": "cutlass",
+   "name": "Cutlass",
+   "tagline": "A companion for the command line that remembers what you ran.",
+   "hue": 152,
+   "mark": "C",
+   "agent": "delta",
+   "template": "metrics",
+   "archetype": "devtool / CLI companion",
+   "nav": [
+    [
+     "#/",
+     "Terminal"
+    ]
+   ],
+   "desc": "Browser terminal for a fictional deploy CLI: real command parsing, tab completion, history, piping into a JSON filter and a virtual project state the commands actually mutate."
+  },
+  {
+   "slug": "kindling",
+   "name": "Kindling",
+   "tagline": "A storefront small enough to launch this afternoon.",
+   "hue": 8,
+   "mark": "K",
+   "agent": "juno",
+   "template": "hygge",
+   "archetype": "ecommerce storefront",
+   "nav": [
+    [
+     "#/",
+     "Shop"
+    ],
+    [
+     "#/cart",
+     "Cart"
+    ]
+   ],
+   "desc": "Storefront with faceted catalogue, product detail, variant picker, persistent cart and a checkout form that posts the order to @hanzo/base."
+  },
+  {
+   "slug": "reverb",
+   "name": "Reverb",
+   "tagline": "A player with a waveform, because audio is a shape.",
+   "hue": 320,
+   "mark": "R",
+   "agent": "iris",
+   "template": "video-streaming",
+   "archetype": "audio / media player",
+   "nav": [
+    [
+     "#/",
+     "Player"
+    ]
+   ],
+   "desc": "Web Audio workstation: a synthesised track built from oscillators and noise, transport controls, a real-time FFT spectrum and waveform, per-band mixer, and a step sequencer you can play."
+  },
+  {
+   "slug": "highland",
+   "name": "Highland",
+   "tagline": "Generated landscape you can fly over, seeded by a number.",
+   "hue": 320,
+   "mark": "H",
+   "agent": "iris",
+   "template": "three-webgpu",
+   "archetype": "WebGL / 3D",
+   "nav": [
+    [
+     "#/",
+     "Scene"
+    ]
+   ],
+   "desc": "WebGL2 procedural terrain: a value-noise heightfield meshed on the GPU with fly-through camera, adjustable octaves, erosion-style ridging, water level, fog and wireframe."
+  },
+  {
+   "slug": "antipode",
+   "name": "Antipode",
+   "tagline": "What time it is for everyone else, before you send the invite.",
+   "hue": 96,
+   "mark": "A",
+   "agent": "nomad",
+   "template": "deploy",
+   "archetype": "utility / scheduling",
+   "nav": [
+    [
+     "#/",
+     "Planner"
+    ]
+   ],
+   "desc": "Timezone planner: live analogue and digital clocks per city, a 24-hour overlap band that shades working hours, a meeting slot picker that converts across every zone and an ICS export."
+  },
+  {
+   "slug": "tincture",
+   "name": "Tincture",
+   "tagline": "Design tokens with contrast checked at the point you pick the colour.",
+   "hue": 320,
+   "mark": "T",
+   "agent": "iris",
+   "template": "blocks",
+   "archetype": "design system tool",
+   "nav": [
+    [
+     "#/",
+     "Palette"
+    ],
+    [
+     "#/contrast",
+     "Contrast"
+    ],
+    [
+     "#/export",
+     "Export"
+    ]
+   ],
+   "desc": "Design token studio: generate a full tonal palette from a seed colour in OKLCH, check every foreground/background pair against WCAG contrast, preview components live, and export CSS variables, JSON or Tailwind config."
+  },
+  {
+   "slug": "watchtower",
+   "name": "Watchtower",
+   "tagline": "A status page that is honest during the incident, not after it.",
+   "hue": 200,
+   "mark": "W",
+   "agent": "kestrel",
+   "template": "changelog",
+   "archetype": "status page",
+   "nav": [
+    [
+     "#/",
+     "Status"
+    ],
+    [
+     "#/history",
+     "Incident history"
+    ]
+   ],
+   "desc": "Public status page: per-service 90-day uptime bars, live overall banner, active and historical incidents with updates, and a subscribe form on @hanzo/base."
+  },
+  {
+   "slug": "lodestone",
+   "name": "Lodestone",
+   "tagline": "Embedding search you can inspect: the vector, the neighbours, the distance.",
+   "hue": 268,
+   "mark": "L",
+   "agent": "sage",
+   "template": "synapse",
+   "archetype": "RAG / embedding search",
+   "nav": [
+    [
+     "#/",
+     "Explore"
+    ]
+   ],
+   "desc": "Embedding search laid bare: documents are vectorised with a hashed bag-of-words model in the page, projected to 2D with power iteration PCA, and queried by cosine similarity with the ranking shown alongside the plot."
+  },
+  {
+   "slug": "reel",
+   "name": "Reel",
+   "tagline": "Video streaming with a shelf, a player and a resume position.",
+   "hue": 28,
+   "mark": "R",
+   "agent": "solaris",
+   "template": "video-streaming",
+   "archetype": "video streaming UI",
+   "nav": [
+    [
+     "#/",
+     "Browse"
+    ]
+   ],
+   "desc": "Video streaming interface: a real HTML5 player with custom controls, keyboard shortcuts, quality and speed menus, chapters, a scrubbable timeline with thumbnail scrubbing, continue-watching state and a browse grid.",
+   "derive": {
+    "repo": "video-streaming",
+    "replace": [
+     [
+      "Related Videos",
+      "Up next"
+     ],
+     [
+      "Advanced React Patterns",
+      "How a static host serves 74 products"
+     ],
+     [
+      "Tailwind CSS Mastery",
+      "Content-addressed releases, end to end"
+     ],
+     [
+      "State Management in 2024",
+      "What a fork edge is actually for"
+     ],
+     [
+      "Code Academy",
+      "Hanzo Engineering"
+     ],
+     [
+      "Design Pro",
+      "Hanzo Engineering"
+     ]
+    ]
+   }
+  },
+  {
+   "slug": "cubit",
+   "name": "Cubit",
+   "tagline": "Build a world one cube at a time, then walk around inside it.",
+   "hue": 320,
+   "mark": "C",
+   "agent": "iris",
+   "template": "voxel-craft",
+   "archetype": "WebGL / 3D editor",
+   "nav": [
+    [
+     "#/",
+     "Editor"
+    ]
+   ],
+   "desc": "Voxel editor in WebGL2: place and remove cubes with a real ray-picked cursor, orbit and zoom, per-face shading, a colour palette, undo, and export of the scene to a .obj mesh."
+  },
+  {
+   "slug": "liftoff",
+   "name": "Liftoff",
+   "tagline": "A launch page with one job: take the email address.",
+   "hue": 28,
+   "mark": "L",
+   "agent": "solaris",
+   "template": "launch",
+   "archetype": "waitlist / launch page",
+   "nav": [
+    [
+     "#/",
+     "Home"
+    ],
+    [
+     "#/pricing",
+     "Pricing"
+    ],
+    [
+     "#/faq",
+     "FAQ"
+    ]
+   ],
+   "desc": "Product launch page: animated gradient hero, countdown, feature grid, pricing, FAQ accordion and a waitlist form that writes to @hanzo/base and shows a queue position."
+  },
+  {
+   "slug": "slate",
+   "name": "Slate",
+   "tagline": "A whiteboard that several people can draw on without fighting.",
+   "hue": 178,
+   "mark": "S",
+   "agent": "echo",
+   "template": "canvas",
+   "archetype": "collaborative editor / whiteboard",
+   "nav": [
+    [
+     "#/",
+     "Board"
+    ]
+   ],
+   "desc": "Infinite whiteboard: pen, shapes, sticky notes and text with pan/zoom, undo/redo, multi-select, export to PNG and live sync across tabs."
+  }
+ ]
+}
