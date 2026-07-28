@@ -141,8 +141,10 @@ def brand(d, p):
                        r"(\s+hover:bg-(?:amber|orange|blue|indigo|violet|emerald|"
                        r"rose|red|green|purple|sky|teal|cyan)-(?:600|700))",
                        "bg-primary hover:bg-primary/90", s)
-            # Every one of these templates ships the same placeholder subtitle.
-            s = s.replace("Built with @hanzo/ui components", p["tagline"])
+            # Every one of these templates ships the same placeholder subtitle,
+            # in half a dozen phrasings. A product says what IT is.
+            s = re.sub(r"[A-Z][^\"'<>{}]*?built with @hanzo/ui components",
+                       p["tagline"], s, flags=re.I)
             if s != t:
                 open(fp, "w", encoding="utf-8").write(s)
                 n += 1
