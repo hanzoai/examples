@@ -82,7 +82,12 @@ def main():
             print("%-22s %s status=%s nodes=%-4s text=%-5s badge=%s ink=%s %s" % (
                 r["slug"], "PASS" if r["ok"] else "FAIL", r["status"], r.get("nodes"),
                 r.get("text"), r.get("badge"), r.get("ink", "-"), "; ".join(r["errs"])), flush=True)
-    json.dump(rows, open(os.path.join(ROOT, "verify.json"), "w"), indent=1)
+    # Merge, never replace: a single-slug run must not erase the evidence for
+    # every other app, or the gallery silently shrinks to what was last checked.
+    vp = os.path.join(ROOT, "verify.json")
+    old = {r["slug"]: r for r in (json.load(open(vp)) if os.path.exists(vp) else [])}
+    old.update({r["slug"]: r for r in rows})
+    json.dump(sorted(old.values(), key=lambda r: r["slug"]), open(vp, "w"), indent=1)
     bad = [r["slug"] for r in rows if not r["ok"]]
     print("\n%d/%d PASS%s" % (len(rows) - len(bad), len(rows), ("  FAIL: " + " ".join(bad)) if bad else ""))
 
