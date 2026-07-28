@@ -1,0 +1,65 @@
+<!--hz {"title":"AskDocs","archetype":"AI chat / RAG over docs","creator":"ai","desc":"Retrieval-augmented chat over a small bundled document set: TF-IDF retrieval in the browser, cited passages, streaming answer composition.","nav":[["#/","Chat"]]} -->
+<div class="split">
+  <div class="pane">
+    <header>Indexed corpus</header>
+    <ul class="list" id="docs"></ul>
+    <div class="body"><p class="hz-note">Retrieval runs entirely in this page: the corpus is tokenised, IDF-weighted and scored per query. The answer is composed from the retrieved passages — it is a demonstration of the RAG interaction pattern, not a language model.</p></div>
+  </div>
+  <div class="pane" style="display:flex;flex-direction:column;height:min(72vh,680px)">
+    <header>Ask the docs <span class="spacer"></span><span class="small muted" id="hits"></span></header>
+    <div class="body chat-log" id="log" style="flex:1"></div>
+    <form id="f" style="display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)">
+      <input id="q" placeholder="e.g. how do releases roll back?" autocomplete="off">
+      <button class="p" type="submit">Ask</button>
+    </form>
+  </div>
+</div>
+<div class="row" style="margin-top:10px;gap:6px" id="sugg"></div>
+<script>
+const {h,fill,$,store,submit,toast,fmt} = hz;
+const CORPUS = [
+  ['Releases','A release is content-addressed: its id is the digest of its file manifest, so identical content always yields the same release id. Publishing creates a release then activates it. Activation is an atomic pointer flip, which means a rollback is simply activating an older release id — no rebuild and no redeploy.'],
+  ['Sites','A site is served at slug.apex, where the default apex is hanzo.app. A wildcard certificate covers every subdomain, so a newly published slug is reachable over TLS immediately. Reserved labels such as api, admin, docs and status can never be claimed as a site slug.'],
+  ['Base','Base is the data layer. A published site host serves its own org Base under /v1/base, so an anonymous page can create records without holding a credential. The submissions collection accepts a create from anyone; reads stay private to the space owner.'],
+  ['Deploys','A deploy uploads a file manifest of paths and contents. Every HTML file is passed through a viewport guarantee so the page is responsive even if the author omitted the meta tag. Files are stored in object storage and served from the edge with a sixty second browser cache.'],
+  ['Analytics','Every published site receives the shared runtime: an analytics beacon and a chat widget, both loaded from the shared asset host. They are injected at deploy time rather than vendored, so the runtime is updated in one place instead of once per site.'],
+  ['Custom domains','A custom domain is bound to a site after a verification record is observed. Until verification completes the site keeps serving on its default subdomain. Removing a domain never deletes the underlying releases.'],
+];
+const STOP = new Set('a an the and or of to in is are for it that this be on with as by from how do does can what when where'.split(' '));
+const tok = s => s.toLowerCase().match(/[a-z0-9]+/g)?.filter(w=>!STOP.has(w)&&w.length>2) || [];
+const SENT = CORPUS.flatMap(([t,b],di) => b.split(/(?<=\.)\s+/).map((s,si)=>({t,di,si,s,w:tok(s)})));
+const DF = {}; SENT.forEach(p => new Set(p.w).forEach(w => DF[w]=(DF[w]||0)+1));
+const idf = w => Math.log(1 + SENT.length/(1+(DF[w]||0)));
+
+function retrieve(q,k=3){
+  const qw = tok(q); if(!qw.length) return [];
+  return SENT.map(p => ({p, s: qw.reduce((a,w)=> a + (p.w.includes(w)? idf(w)*(1+0.4*p.w.filter(x=>x===w).length) : 0), 0)}))
+    .filter(x=>x.s>0).sort((a,b)=>b.s-a.s).slice(0,k);
+}
+fill($('#docs'), CORPUS.map(([t,b],i)=>h('li', h('div',{style:{minWidth:0}},
+  h('div.b',t), h('div.small.muted.trunc',{style:{maxWidth:'200px'}}, b.slice(0,60)+'…')),
+  h('span.spacer'), h('span.tag', b.split(/(?<=\.)\s+/).length+' ¶'))));
+
+const log = $('#log');
+function say(who, node){ const m=h('div.msg.'+(who==='you'?'me':'them'), h('div.who',who==='you'?'You':'AskDocs'), node); log.append(m); log.scrollTop=log.scrollHeight; return m; }
+async function stream(el, text){
+  const span = h('span'); el.append(span);
+  for(const w of text.split(' ')){ span.append(w+' '); log.scrollTop=log.scrollHeight; await new Promise(r=>setTimeout(r,16)); }
+}
+async function ask(q){
+  say('you', h('span', q));
+  const hits = retrieve(q);
+  $('#hits').textContent = hits.length ? hits.length+' passages retrieved' : 'no match';
+  const box = h('div');
+  const m = say('bot', box);
+  if(!hits.length){ await stream(box, 'Nothing in the indexed corpus matches that. Try asking about releases, sites, Base, deploys, analytics or custom domains.'); return; }
+  await stream(box, hits.map(x=>x.p.s).join(' '));
+  box.append(h('div',{style:{marginTop:'8px',display:'flex',gap:'6px',flexWrap:'wrap'}},
+    hits.map(x => h('span.tag.acc', x.p.t+' §'+(x.p.si+1)))));
+  try { await submit('askdocs.query', {q, cited: hits.map(x=>x.p.t)}); } catch(e){}
+}
+$('#f').onsubmit = e => { e.preventDefault(); const v=$('#q').value.trim(); if(!v) return; $('#q').value=''; ask(v); };
+fill($('#sugg'), ['How do releases roll back?','Can an anonymous page write data?','What is a reserved slug?','How is the runtime injected?']
+  .map(s=>h('button.sm',{onclick:()=>ask(s)}, s)));
+say('bot', h('span','Ask a question about the six indexed documents on the left. Each answer quotes the passages it retrieved and shows their source.'));
+</script>

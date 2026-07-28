@@ -1,0 +1,120 @@
+<!--hz {"title":"Assistant","archetype":"AI chat app","creator":"ai","desc":"Assistant chat shell: multi-conversation sidebar, streaming token rendering, markdown and code blocks with copy, stop generation, regenerate, model and temperature controls and message export.","nav":[["#/","Chat"]]} -->
+<div class="split">
+  <div class="pane">
+    <header>Conversations <span class="spacer"></span><button class="g sm" id="new">+</button></header>
+    <ul class="list" id="convs"></ul>
+    <div class="body col">
+      <div class="field" style="margin:0"><label>Model</label><select id="model"></select></div>
+      <div class="field" style="margin:0"><label>Temperature <span id="tv"></span></label>
+        <input id="temp" type="range" min="0" max="1.4" step="0.05" value="0.7"></div>
+      <div class="field" style="margin:0"><label>System prompt</label><textarea id="sys" style="min-height:70px"></textarea></div>
+      <button class="g" id="export">Export transcript</button>
+    </div>
+  </div>
+  <div class="pane" style="display:flex;flex-direction:column;height:min(76vh,760px)">
+    <header id="title">New conversation<span class="spacer"></span><span class="small muted" id="meta"></span></header>
+    <div class="body chat-log" id="log" style="flex:1"></div>
+    <form id="f" style="display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)">
+      <textarea id="in" placeholder="Ask something… (Enter to send, Shift+Enter for a new line)" style="min-height:44px;max-height:140px"></textarea>
+      <button class="p" type="submit" id="send">Send</button>
+      <button class="g" type="button" id="stop" disabled>Stop</button>
+    </form>
+  </div>
+</div>
+<p class="hz-note" style="margin-top:14px">This is the <b>interface</b> for an assistant, not a model. Replies are composed by a scripted responder in this page so the streaming, markdown, code-block and regenerate behaviour can be demonstrated without a model call. Every message is also written to @hanzo/base.</p>
+<script>
+const {h,fill,$,store,uid,fmt,esc,toast,submit} = hz;
+const MODELS = ['zen-1-mini','zen-1','zen-1-pro'];
+const convs = store('assistant.convs', [{id:uid(), title:'Getting started', at:Date.now(), msgs:[]}]);
+const cur = store('assistant.cur', convs.get()[0].id);
+let streaming = null;
+fill($('#model'), MODELS.map(m=>h('option',m)));
+$('#sys').value = 'You are a concise assistant for a deploy platform. Prefer short answers with a code block when relevant.';
+$('#temp').oninput = e => $('#tv').textContent = '· '+e.target.value; $('#temp').oninput({target:$('#temp')});
+
+const ANSWERS = [
+ [/rollback|roll back|revert/i, "A rollback is an **activation**, not a rebuild.\n\nEvery release is addressed by the digest of its file manifest, so an older release is still intact and still addressable. Activating it flips one pointer:\n\n```\nPOST /v1/sites/my-app/releases/rel_1b93de/activate\n```\n\nBecause the flip is atomic, a reader sees either the whole old release or the whole new one — never a mixture."],
+ [/deploy|publish|ship/i, "Publishing takes a manifest of paths and contents:\n\n```js\nawait fetch('/v1/sites/deploy', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({ slug: 'my-app', files: [{ path: 'index.html', content: html }] })\n});\n```\n\nThe response carries the live URL, the deployment id and the file list. There is no build step in the path."],
+ [/base|data|form|record|store/i, "Use the submissions collection on the page's **own origin**:\n\n```js\nawait fetch('/v1/base/collections/submissions/records', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({ form: 'signup', data: { email } })\n});\n```\n\nCreate is open so an anonymous page can post; reads stay private to the space owner. No credential lives in the page."],
+ [/domain|dns|tls|cert/i, "Bind the domain, publish the verification record, and the certificate is issued automatically.\n\nUntil verification completes the site keeps serving on its default subdomain, so nothing goes dark during the cutover. Note that a wildcard covers exactly one label — `*.example.com` matches `www.example.com` but never the bare apex."],
+ [/limit|size|413|quota/i, "Two limits are worth remembering:\n\n- a deploy **body** is capped at 4 MiB\n- an artifact may hold 5,000 entries, each up to 64 MiB\n\nA 413 almost always means large media was inlined into the manifest. Put it in object storage and reference it."],
+ [/hello|hi|hey|help/i, "I can talk about deploys, releases and rollback, the data layer, custom domains and platform limits.\n\nTry: *how do I roll back?*"],
+];
+const FALLBACK = "I only carry a small scripted answer set in this demonstration: deploys, releases and rollback, the data layer, custom domains, and platform limits. Ask about one of those and you will get a real answer; ask about anything else and you will get this message, which is the honest outcome.";
+
+const conv = () => convs.get().find(c=>c.id===cur.get()) || convs.get()[0];
+function md(s){
+  const parts = esc(s).split(/```/);
+  return parts.map((p,i)=> i%2
+    ? '<pre>'+p.replace(/^\w*\n/,'')+'</pre>'
+    : p.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/\*(.+?)\*/g,'<i>$1</i>')
+       .replace(/`([^`]+)`/g,'<code>$1</code>')
+       .replace(/^- (.+)$/gm,'• $1').replace(/\n/g,'<br>')).join('');
+}
+function convList(){
+  fill($('#convs'), convs.get().map(c=>h('li',{style:{cursor:'pointer',background:c.id===cur.get()?'var(--bg3)':''},
+    onclick:()=>{cur.set(c.id); draw();}},
+    h('div',{style:{minWidth:0}}, h('div.small.b.trunc',c.title), h('div.small.muted',c.msgs.length+' messages · '+fmt.ago(c.at))),
+    h('span.spacer'),
+    h('button.g.sm',{onclick:e=>{e.stopPropagation();
+      convs.set(v=>v.filter(x=>x.id!==c.id)); if(!convs.get().length) newConv(); cur.set(convs.get()[0].id); draw();}},'✕'))));
+}
+function draw(){
+  const c = conv();
+  $('#title').firstChild.textContent = c.title;
+  $('#meta').textContent = c.msgs.length+' messages';
+  fill($('#log'), c.msgs.map((m,i)=>{
+    const b = h('div.msg.'+(m.role==='user'?'me':'them'), h('div.who',m.role==='user'?'You':m.model||'Assistant'));
+    b.append(h('div',{html: md(m.text)}));
+    if(m.role!=='user') b.append(h('div.row',{style:{gap:'6px',marginTop:'6px'}},
+      h('button.g.sm',{onclick:()=>{navigator.clipboard?.writeText(m.text);toast('Copied');}},'Copy'),
+      i===c.msgs.length-1? h('button.g.sm',{onclick:()=>regen()},'Regenerate') : null));
+    return b;
+  }));
+  $('#log').scrollTop = $('#log').scrollHeight;
+  convList();
+}
+function reply(q){ for(const [re,a] of ANSWERS) if(re.test(q)) return a; return FALLBACK; }
+async function answer(q){
+  const c = conv(), model = $('#model').value;
+  const msg = {role:'assistant', text:'', model};
+  convs.set(v=>v.map(x=>x.id===c.id?{...x, msgs:[...x.msgs, msg]}:x)); draw();
+  const full = reply(q);
+  streaming = {stop:false};
+  $('#stop').disabled=false; $('#send').disabled=true;
+  const toks = full.match(/\S+\s*/g)||[];
+  for(const t of toks){
+    if(streaming.stop) break;
+    msg.text += t;
+    convs.set(v=>v.map(x=>x.id===c.id?{...x, msgs:[...x.msgs.slice(0,-1), {...msg}]}:x));
+    draw();
+    await new Promise(r=>setTimeout(r, 14 + Math.random()*26));
+  }
+  streaming=null; $('#stop').disabled=true; $('#send').disabled=false;
+  submit('assistant.turn',{q, model, chars: msg.text.length}).catch(()=>{});
+}
+function regen(){ const c=conv(); const lastUser=[...c.msgs].reverse().find(m=>m.role==='user');
+  convs.set(v=>v.map(x=>x.id===c.id?{...x,msgs:x.msgs.slice(0,-1)}:x)); draw();
+  if(lastUser) answer(lastUser.text); }
+$('#f').onsubmit = e => { e.preventDefault(); const q=$('#in').value.trim(); if(!q||streaming) return;
+  $('#in').value='';
+  const c = conv();
+  convs.set(v=>v.map(x=>x.id===c.id?{...x, msgs:[...x.msgs,{role:'user',text:q}],
+    title: x.msgs.length? x.title : q.slice(0,42)}:x));
+  draw(); answer(q); };
+$('#in').addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); $('#f').requestSubmit(); }});
+$('#stop').onclick = () => { if(streaming) streaming.stop=true; };
+function newConv(){ const c={id:uid(),title:'New conversation',at:Date.now(),msgs:[]};
+  convs.set(v=>[c,...v]); cur.set(c.id); draw(); }
+$('#new').onclick = newConv;
+$('#export').onclick = () => {
+  const c = conv();
+  const text = c.msgs.map(m=>(m.role==='user'?'## You\n':'## Assistant\n')+m.text).join('\n\n');
+  const a = h('a',{download:'transcript.md',href:URL.createObjectURL(new Blob([text],{type:'text/markdown'}))});
+  a.click(); toast('Transcript exported');
+};
+if(!conv().msgs.length) convs.set(v=>v.map((x,i)=>i?x:{...x, msgs:[{role:'assistant',
+  text:"Ask about deploys, releases and rollback, the data layer, custom domains or platform limits.\n\nStreaming, markdown, code blocks, stop and regenerate all work — the answers come from a small scripted set rather than a model.",
+  model:MODELS[0]}]}));
+draw();
+</script>

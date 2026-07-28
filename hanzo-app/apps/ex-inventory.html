@@ -1,0 +1,95 @@
+<!--hz {"title":"Stockroom","archetype":"inventory","creator":"apps","desc":"Inventory control: stock on hand across locations, reorder points, stock movements ledger and a receive/issue form backed by @hanzo/base.","nav":[["#/","Stock"],["#/moves","Movements"],["#/reorder","Reorder"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Stockroom</h1><span class="tag" id="kpi"></span>
+  <span class="spacer"></span>
+  <button class="p" id="recv">Receive</button><button id="issue">Issue</button>
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:16px">SKUs, quantities and suppliers are synthetic demo data. Movements you post are appended locally and to @hanzo/base.</p>
+<script>
+const {h,fill,$,store,rng,range,pick,uid,fmt,grid,bars,donut,modal,toast,submit,route,spark} = hz;
+const r = rng(9012);
+const LOCS = ['SFO-1','ORD-2','AMS-1'];
+const NAMES = ['Hex bolt M6','Hex bolt M8','Bearing 608ZZ','Belt 300mm','Stepper NEMA17','Driver A4988','PSU 24V 5A',
+ 'Filament PLA 1kg','Filament PETG 1kg','Nozzle 0.4mm','Heat block','Thermistor 100k','Limit switch','Cable drag 10x20',
+ 'Alu extrusion 2020','Coupler 5x8','Lead screw T8','Fan 40mm','Fan 60mm','Glass bed 235'];
+const seed = NAMES.map((n,i)=>({
+  id: uid(), sku:'SR-'+String(1000+i*7), name:n,
+  loc: LOCS[i%3], qty: Math.round(r()*260), rop: 40+Math.round(r()*60),
+  cost: +(2+r()*48).toFixed(2), sup: pick(r,['Northwind','Cedarline','Ironleaf','Kestrel']),
+  hist: range(14,()=>Math.round(40+r()*220)),
+}));
+const db = store('stockroom', seed);
+const moves = store('stockroom.moves', []);
+const view = $('#view');
+
+function kpi(){
+  const d = db.get();
+  $('#kpi').textContent = d.length+' SKUs · '+fmt.money(d.reduce((a,x)=>a+x.qty*x.cost,0))+' at cost · '
+    + d.filter(x=>x.qty<x.rop).length+' below reorder';
+}
+function stock(){
+  fill(view, h('div.pane', grid([
+    {k:'sku',t:'SKU',w:'104px',cell:x=>h('span.mono.small',x.sku)},
+    {k:'name',t:'Item',cell:x=>h('div',h('div.b',x.name),h('div.small.muted',x.sup))},
+    {k:'loc',t:'Location',cell:x=>h('span.tag',x.loc)},
+    {k:'qty',t:'On hand',num:true,cell:x=>h('span.'+(x.qty<x.rop?'down b':'num'),fmt.n(x.qty))},
+    {k:'rop',t:'Reorder at',num:true},
+    {k:'cost',t:'Unit',num:true,cell:x=>fmt.money(x.cost)},
+    {k:'id',t:'14-day',w:'110px',cell:x=>spark(x.hist, x.qty<x.rop?'#f4685e':'#3ecf8e',100,22)},
+  ], db.get(), {onRow:detail, placeholder:'Search SKU or item…'})));
+}
+function movesView(){
+  const m = moves.get();
+  fill(view, h('div.pane', h('header','Stock movement ledger'),
+    m.length ? h('div.scroll-x',h('table',
+      h('thead',h('tr',h('th','When'),h('th','SKU'),h('th','Type'),h('th','Qty'),h('th','Location'),h('th','Note'))),
+      h('tbody', m.map(x=>h('tr',h('td.small.muted',fmt.ago(x.at)),h('td.mono.small',x.sku),
+        h('td',h('span.tag '+(x.type==='receive'?'ok':'warn'),x.type)),
+        h('td.num',(x.type==='receive'?'+':'−')+x.qty),h('td',x.loc),h('td.small.muted',x.note||'—'))))))
+      : h('div.empty','No movements recorded yet — use Receive or Issue above.')));
+}
+function reorder(){
+  const low = db.get().filter(x=>x.qty<x.rop).sort((a,b)=>(a.qty/a.rop)-(b.qty/b.rop));
+  const byLoc = LOCS.map(l=>({k:l, v:db.get().filter(x=>x.loc===l).reduce((a,x)=>a+x.qty*x.cost,0)}));
+  fill(view, h('div.split.r',
+    h('div.pane',h('header','Below reorder point ('+low.length+')'),
+      low.length? h('table',h('thead',h('tr',h('th','Item'),h('th','On hand'),h('th','Reorder'),h('th','Suggested PO'))),
+        h('tbody',low.map(x=>h('tr',h('td',h('div.b',x.name),h('div.small.muted',x.sku)),
+          h('td.num.down',x.qty),h('td.num',x.rop),
+          h('td.num',fmt.n(Math.max(x.rop*2-x.qty,10))+' × '+fmt.money(x.cost))))))
+        : h('div.empty','Everything is above its reorder point.')),
+    h('div.pane',h('header','Inventory value by location'),h('div.body',donut(byLoc),
+      h('div',{style:{marginTop:'12px'}}, bars(byLoc.map(x=>({...x,f:fmt.money(x.v)}))))))));
+}
+function detail(x){
+  modal(x.name, h('div',
+    h('div.row',{style:{gap:'6px',marginBottom:'10px'}},h('span.tag.acc',x.sku),h('span.tag',x.loc),h('span.tag',x.sup)),
+    h('div.grid.k4',
+      h('div.stat',h('div.k','On hand'),h('div.v',fmt.n(x.qty))),
+      h('div.stat',h('div.k','Reorder at'),h('div.v',x.rop)),
+      h('div.stat',h('div.k','Unit cost'),h('div.v',fmt.money(x.cost))),
+      h('div.stat',h('div.k','Value'),h('div.v',fmt.money(x.qty*x.cost)))),
+    h('div',{style:{marginTop:'12px'}}, spark(x.hist,'#5b8cff',560,80))));
+}
+function mv(type){
+  const d = db.get();
+  const sel = h('select', d.map(x=>h('option',{value:x.id},x.sku+' — '+x.name)));
+  const q = h('input',{type:'number',value:10,min:1}); const n = h('input',{placeholder:'Reference / note'});
+  modal(type==='receive'?'Receive stock':'Issue stock', h('div',
+    h('div.field',h('label','Item'),sel), h('div.field',h('label','Quantity'),q),
+    h('div.field',h('label','Note'),n)),
+    async () => {
+      const item = d.find(x=>x.id===sel.value); const qty = Math.max(1,+q.value||0);
+      db.set(v=>v.map(x=>x.id===item.id?{...x,qty:Math.max(0,x.qty+(type==='receive'?qty:-qty)),hist:[...x.hist.slice(1),x.qty]}:x));
+      const rec = {at:Date.now(),sku:item.sku,type,qty,loc:item.loc,note:n.value.trim()};
+      moves.set(v=>[rec,...v]); kpi(); render();
+      try{ await submit('stockroom.move', rec); toast('Movement posted to @hanzo/base'); }catch(e){ toast('Movement recorded locally'); }
+    }, type==='receive'?'Receive':'Issue');
+}
+$('#recv').onclick = () => mv('receive'); $('#issue').onclick = () => mv('issue');
+let render = stock;
+route({'':()=>{render=stock;stock();},'moves':()=>{render=movesView;movesView();},
+       'reorder':()=>{render=reorder;reorder();},'*':()=>{render=stock;stock();}});
+kpi();
+</script>

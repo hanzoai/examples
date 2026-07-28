@@ -1,0 +1,130 @@
+<!--hz {"title":"Answers","archetype":"forum / Q&A","creator":"web","desc":"Question-and-answer site: ask, answer, vote, accept an answer, tag navigation, unanswered filter and reputation derived from votes.","nav":[["#/","Questions"],["#/ask","Ask"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Answers</h1><span class="tag" id="n"></span>
+  <span class="spacer"></span><span id="filters" class="row" style="gap:4px"></span>
+  <a class="btn p" href="#/ask">Ask a question</a>
+</div>
+<div class="split r"><div id="view"></div>
+  <div class="col">
+    <div class="pane"><header>Tags</header><div class="body row" id="tags" style="gap:5px"></div></div>
+    <div class="pane"><header>How this works</header><div class="body">
+      <p class="small">Vote on questions and answers, and accept the one that solved your problem. Reputation below is derived from the votes in this browser — it is not a claim about any person.</p></div></div>
+    <div class="pane"><header>Reputation</header><ul class="list" id="rep"></ul></div>
+  </div></div>
+<script>
+const {h,fill,$,store,rng,range,pick,uid,fmt,avatar,toast,submit,route,wire,tabs} = hz;
+const r = rng(9191);
+const USERS = ['nightbuild','ops_diary','tinyrepo','sdf_notes','cold_start'];
+const Q = [
+ ['Why does my static export drop API routes?','A route handler runs on a server. Under a static export there is no server, so the build has nothing to emit for that path. What is the least surprising way to handle this — fail the build, or drop the route with a warning?',['static','build'],
+  [['The build should fail loudly. A silently missing endpoint is discovered in production, which is the worst possible time.',9,true],
+   ['We drop them and print a warning listing every removed path. Failing broke too many demo deploys.',3,false]]],
+ ['How do I roll back without rebuilding?','Every release is addressed by the digest of its manifest, but the docs do not spell out the rollback command.',['releases','deploys'],
+  [['Activate the earlier release id. Activation is a pointer flip, so nothing is rebuilt and nothing is re-uploaded.',14,true]]],
+ ['Anonymous page writing to the data layer — is that safe?','The submissions collection has an empty create rule. What stops someone posting a million records?',['base','security'],
+  [['Create is open, read is not, so the blast radius is storage rather than disclosure. Rate limiting belongs at the edge, not in the collection rule.',7,false],
+   ['Add a per-form quota and a size cap on the payload. The default is fine for a form; it is not fine for a firehose.',11,true]]],
+ ['Wildcard certificate not covering the apex',"Every subdomain resolves over TLS but the bare apex does not. Is that expected?",['tls','domains'],
+  [['Yes. A wildcard covers one label, so it matches sub.example.com but never example.com. The apex needs its own name on the certificate.',12,true]]],
+ ['What belongs on the reserved subdomain list?','We reserve about forty labels. What have others been bitten by?',['security','domains'],[]],
+ ['Deploy returns 413 above four megabytes','Three megabyte artifacts work, six megabyte ones do not. Where is the limit set?',['deploys','limits'],
+  [['The edge caps the request body. Large media should live in object storage and be referenced from the page rather than inlined into the manifest.',6,false]]],
+];
+const seed = Q.map(([t,b,tags,answers],i)=>({
+  id:uid(), t, b, tags, by:USERS[i%USERS.length], at:Date.now()-Math.round(r()*300)*36e5,
+  votes:Math.round(r()*20), views:Math.round(40+r()*900),
+  answers: answers.map(([body,v,acc])=>({id:uid(), body, by:pick(r,USERS), votes:v, acc, at:Date.now()-Math.round(r()*200)*36e5})),
+}));
+const db = store('answers', seed);
+const my = store('answers.votes', {});
+const view = $('#view');
+let filter='Newest';
+
+const rep = () => { const m={};
+  db.get().forEach(q=>{ m[q.by]=(m[q.by]||0)+q.votes*2;
+    q.answers.forEach(a=>{ m[a.by]=(m[a.by]||0)+a.votes*5+(a.acc?15:0); }); });
+  return Object.entries(m).sort((a,b)=>b[1]-a[1]); };
+function sidebar(){
+  const tags = {}; db.get().forEach(q=>q.tags.forEach(t=>tags[t]=(tags[t]||0)+1));
+  fill($('#tags'), Object.entries(tags).sort((a,b)=>b[1]-a[1])
+    .map(([t,n])=>h('span.tag.acc',{style:{cursor:'pointer'},onclick:()=>list(t)},t+' '+n)));
+  fill($('#rep'), rep().map(([u,v])=>h('li',avatar(u,24),h('span.small',u),h('span.spacer'),h('span.tag',v))));
+}
+function vote(kind, qid, aid, dir){
+  const key = kind+':'+(aid||qid);
+  if(my.get()[key]) return toast('You already voted');
+  my.set(v=>({...v,[key]:dir}));
+  db.set(v=>v.map(q=>q.id!==qid?q:(kind==='q'? {...q,votes:q.votes+dir}
+    : {...q, answers:q.answers.map(a=>a.id===aid?{...a,votes:a.votes+dir}:a)})));
+  sidebar(); location.hash.startsWith('#/q/')? open(qid) : list();
+}
+function list(tag){
+  let d = [...db.get()];
+  if(tag) d = d.filter(q=>q.tags.includes(tag));
+  if(filter==='Votes') d.sort((a,b)=>b.votes-a.votes);
+  else if(filter==='Unanswered') d = d.filter(q=>!q.answers.length);
+  else d.sort((a,b)=>b.at-a.at);
+  $('#n').textContent = d.length+' questions'+(tag?' · #'+tag:'');
+  fill(view, h('div.pane', h('ul.list', d.length? d.map(q=>h('li',{style:{alignItems:'flex-start'}},
+      h('div.col',{style:{gap:'2px',width:'62px',flex:'none',alignItems:'center'}},
+        h('span.b.num',q.votes), h('span.small.muted','votes'),
+        h('span.tag'+(q.answers.some(a=>a.acc)?'.ok':''), q.answers.length+' ans')),
+      h('div',{style:{minWidth:0,cursor:'pointer'},onclick:()=>{location.hash='#/q/'+q.id;}},
+        h('div.b',q.t), h('div.small.muted',{style:{margin:'3px 0 6px'}}, q.b.slice(0,120)+'…'),
+        h('div.row',{style:{gap:'5px'}}, q.tags.map(t=>h('span.tag.acc','#'+t)),
+          h('span.small.muted','asked by '+q.by+' · '+fmt.ago(q.at)+' · '+fmt.n(q.views)+' views')))))
+    : h('li',h('span.muted.small','No questions match this view.')))));
+}
+function open(id){
+  const q = db.get().find(x=>x.id===id); if(!q) return list();
+  const answers = [...q.answers].sort((a,b)=>(b.acc?1:0)-(a.acc?1:0) || b.votes-a.votes);
+  const f = h('form', h('div.field',h('label','Your answer'),
+    h('textarea',{name:'body',required:true,style:{minHeight:'110px'}})), h('button.p',{type:'submit'},'Post answer'));
+  wire(f,'answers.answer',(d)=>{ db.set(v=>v.map(x=>x.id===q.id?
+      {...x,answers:[...x.answers,{id:uid(),body:d.body,by:'you',votes:0,acc:false,at:Date.now()}]}:x));
+    sidebar(); open(id); });
+  fill(view, h('div.pane',
+    h('header',h('button.g.sm',{onclick:()=>{location.hash='#/';}},'‹ Questions'),h('span.spacer'),
+      h('span.small.muted',fmt.n(q.views)+' views')),
+    h('div.body',
+      h('h2',q.t),
+      h('div.row',{style:{gap:'6px',margin:'0 0 10px'}}, q.tags.map(t=>h('span.tag.acc','#'+t)),
+        h('span.small.muted','asked by '+q.by+' · '+fmt.ago(q.at))),
+      h('div.row',{style:{alignItems:'flex-start',gap:'12px'}},
+        h('div.col',{style:{gap:'2px',alignItems:'center',width:'44px',flex:'none'}},
+          h('button.g.sm',{onclick:()=>vote('q',q.id,null,1)},'▲'),
+          h('span.b.num',q.votes),
+          h('button.g.sm',{onclick:()=>vote('q',q.id,null,-1)},'▼')),
+        h('p',{style:{margin:0}},q.b))),
+    h('div.body',h('h3',answers.length+' answer'+(answers.length===1?'':'s'))),
+    h('ul.list', answers.length? answers.map(a=>h('li',{style:{alignItems:'flex-start'}},
+        h('div.col',{style:{gap:'2px',alignItems:'center',width:'44px',flex:'none'}},
+          h('button.g.sm',{onclick:()=>vote('a',q.id,a.id,1)},'▲'),
+          h('span.b.num',a.votes),
+          h('button.g.sm',{onclick:()=>vote('a',q.id,a.id,-1)},'▼'),
+          a.acc? h('span',{style:{color:'var(--ok)',fontSize:'18px'},title:'Accepted'},'✓') : null),
+        h('div',{style:{minWidth:0}}, h('div.small',a.body),
+          h('div.row',{style:{gap:'8px',marginTop:'6px'}}, avatar(a.by,22),
+            h('span.small.muted',a.by+' · '+fmt.ago(a.at)),
+            !q.answers.some(x=>x.acc) ? h('button.sm',{onclick:()=>{
+              db.set(v=>v.map(x=>x.id===q.id?{...x,answers:x.answers.map(y=>({...y,acc:y.id===a.id}))}:x));
+              sidebar(); open(id); toast('Answer accepted'); }},'Accept') : null))))
+      : h('li',h('span.muted.small','No answers yet — be the first.'))),
+    h('div.body', f)));
+  scrollTo({top:0});
+}
+function ask(){
+  const f = h('form',
+    h('div.field',h('label','Title'),h('input',{name:'title',required:true,placeholder:'Be specific — what did you try?'})),
+    h('div.field',h('label','Body'),h('textarea',{name:'body',required:true,style:{minHeight:'150px'}})),
+    h('div.field',h('label','Tags, comma separated'),h('input',{name:'tags',placeholder:'deploys, releases'})),
+    h('button.p',{type:'submit'},'Post question'));
+  wire(f,'answers.question',(d)=>{
+    db.set(v=>[{id:uid(),t:d.title,b:d.body,tags:(d.tags||'').split(',').map(s=>s.trim()).filter(Boolean),
+      by:'you',at:Date.now(),votes:0,views:1,answers:[]},...v]);
+    sidebar(); location.hash='#/'; });
+  fill(view, h('div.pane',h('header','Ask a question'),h('div.body',f)));
+}
+fill($('#filters'), tabs(['Newest','Votes','Unanswered'], f=>{filter=f; if(!location.hash.includes('ask')&&!location.hash.includes('/q/')) list();}));
+route({'':()=>{sidebar();list();}, 'ask':()=>{sidebar();ask();}, 'q/:id':a=>{sidebar();open(a.id);}, '*':()=>{sidebar();list();}});
+</script>

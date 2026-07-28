@@ -1,0 +1,149 @@
+<!--hz {"title":"Map","archetype":"maps / geospatial","creator":"gfx","desc":"Canvas map: an equirectangular world drawn from vector coastlines, pan and zoom, clustered markers that split as you zoom in, great-circle route measurement in kilometres and a location search.","nav":[["#/","Map"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Map</h1><span class="tag" id="zoomTag"></span>
+  <span class="spacer"></span>
+  <input id="q" placeholder="Find a city…" style="max-width:220px">
+  <button id="route">Measure route</button><button class="g" id="reset">Reset view</button>
+</div>
+<div class="split r">
+  <div class="pane"><header>World <span class="spacer"></span><span class="small muted" id="coord">—</span></header>
+    <canvas id="c" style="width:100%;display:block;background:#070a12;aspect-ratio:2/1;cursor:grab"></canvas></div>
+  <div class="col">
+    <div class="pane"><header>Places</header><ul class="list" id="places" style="max-height:300px;overflow:auto"></ul></div>
+    <div class="pane"><header>Route</header><div class="body" id="routeBox"></div></div>
+  </div>
+</div>
+<p class="hz-note" style="margin-top:14px">Coastlines are a coarse vector outline drawn in canvas — enough to orient a marker layer without downloading a tile server. Distances use the haversine formula on a spherical earth, so they are accurate to within a few kilometres.</p>
+<script>
+const {h,fill,$,store,fmt,toast,submit} = hz;
+const CITIES = [
+ ['San Francisco',37.77,-122.42,3.3],['Los Angeles',34.05,-118.24,3.9],['Mexico City',19.43,-99.13,9.2],
+ ['New York',40.71,-74.01,8.3],['Toronto',43.65,-79.38,2.8],['Bogotá',4.71,-74.07,7.4],
+ ['São Paulo',-23.55,-46.63,12.3],['Buenos Aires',-34.60,-58.38,3.1],['Reykjavík',64.15,-21.94,0.14],
+ ['London',51.51,-0.13,8.9],['Paris',48.86,2.35,2.1],['Amsterdam',52.37,4.90,0.9],
+ ['Berlin',52.52,13.40,3.7],['Madrid',40.42,-3.70,3.3],['Rome',41.90,12.50,2.8],
+ ['Stockholm',59.33,18.07,0.98],['Istanbul',41.01,28.98,15.5],['Cairo',30.04,31.24,9.5],
+ ['Lagos',6.52,3.38,15.4],['Nairobi',-1.29,36.82,4.4],['Cape Town',-33.92,18.42,4.6],
+ ['Dubai',25.20,55.27,3.4],['Mumbai',19.08,72.88,20.4],['Delhi',28.61,77.21,32.9],
+ ['Bangkok',13.76,100.50,10.5],['Singapore',1.35,103.82,5.9],['Jakarta',-6.21,106.85,10.6],
+ ['Hong Kong',22.32,114.17,7.5],['Shanghai',31.23,121.47,29.2],['Seoul',37.57,126.98,9.9],
+ ['Tokyo',35.68,139.69,37.4],['Sydney',-33.87,151.21,5.3],['Auckland',-36.85,174.76,1.7],
+].map(([n,la,lo,pop])=>({n,la,lo,pop}));
+// Coarse coastline rings (lon,lat pairs) — enough to place the marker layer.
+const LAND = [
+ [[-168,66],[-160,71],[-140,70],[-125,60],[-130,54],[-124,48],[-124,40],[-117,32],[-105,22],[-97,18],[-88,21],[-83,23],[-81,26],[-80,32],[-76,38],[-70,44],[-66,45],[-60,47],[-56,52],[-64,60],[-78,63],[-85,67],[-95,69],[-110,68],[-130,70],[-150,70],[-168,66]],
+ [[-81,8],[-77,1],[-80,-4],[-75,-14],[-70,-20],[-71,-30],[-73,-42],[-75,-52],[-68,-55],[-64,-42],[-58,-38],[-53,-33],[-48,-25],[-40,-20],[-35,-8],[-44,-2],[-50,2],[-58,7],[-62,10],[-72,11],[-77,8],[-81,8]],
+ [[-10,36],[-9,43],[-2,43],[0,49],[-5,50],[-3,55],[-6,58],[5,60],[12,58],[10,55],[20,55],[28,60],[30,66],[24,70],[15,68],[5,62],[4,52],[3,43],[-2,37],[-6,36],[-10,36]],
+ [[-17,15],[-16,22],[-10,28],[-6,36],[10,37],[20,33],[32,31],[35,24],[43,12],[51,11],[42,-1],[40,-12],[35,-22],[32,-29],[25,-34],[18,-34],[14,-23],[12,-15],[9,4],[3,6],[-8,5],[-13,9],[-17,15]],
+ [[26,36],[45,40],[55,45],[60,55],[70,70],[90,76],[110,76],[130,73],[145,70],[160,69],[172,66],[170,60],[160,58],[142,50],[135,44],[128,38],[122,31],[118,24],[108,21],[100,13],[95,16],[88,22],[80,15],[73,20],[68,24],[60,25],[50,29],[43,12],[35,24],[32,31],[26,36]],
+ [[113,-22],[121,-20],[130,-12],[142,-11],[150,-22],[153,-28],[150,-38],[140,-38],[130,-32],[115,-34],[113,-26],[113,-22]],
+];
+const view = store('map.view', {cx:10, cy:20, z:1});
+const cv = $('#c'), cx = cv.getContext('2d');
+let drag=null, routeMode=false, routePts=[], hover=null;
+
+const proj = (la,lo) => { const v=view.get();
+  const s = cv.width/360*v.z;
+  return [cv.width/2 + (lo-v.cx)*s, cv.height/2 - (la-v.cy)*s]; };
+const unproj = (x,y) => { const v=view.get(), s=cv.width/360*v.z;
+  return [v.cy - (y-cv.height/2)/s, v.cx + (x-cv.width/2)/s]; };
+const km = (a,b) => { const R=6371, t=x=>x*Math.PI/180;
+  const dLa=t(b.la-a.la), dLo=t(b.lo-a.lo);
+  const h0=Math.sin(dLa/2)**2 + Math.cos(t(a.la))*Math.cos(t(b.la))*Math.sin(dLo/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h0)); };
+function clusters(){
+  const v = view.get(), grid = Math.max(2, 26/v.z), m = new Map();
+  CITIES.forEach(c=>{ const k = Math.round(c.lo/grid)+':'+Math.round(c.la/grid);
+    const g = m.get(k)||[]; g.push(c); m.set(k,g); });
+  return [...m.values()].map(g=>({items:g,
+    la:g.reduce((a,c)=>a+c.la,0)/g.length, lo:g.reduce((a,c)=>a+c.lo,0)/g.length,
+    pop:g.reduce((a,c)=>a+c.pop,0)}));
+}
+function draw(){
+  const dpr = Math.min(devicePixelRatio||1,2);
+  if(cv.width !== Math.round(cv.clientWidth*dpr)){
+    cv.width = Math.round(cv.clientWidth*dpr); cv.height = Math.round(cv.width/2); }
+  const v = view.get();
+  cx.fillStyle='#070a12'; cx.fillRect(0,0,cv.width,cv.height);
+  cx.strokeStyle='rgba(120,140,190,.10)'; cx.lineWidth=1;
+  for(let lo=-180;lo<=180;lo+=30){ const [x]=proj(0,lo);
+    cx.beginPath(); cx.moveTo(x,0); cx.lineTo(x,cv.height); cx.stroke(); }
+  for(let la=-60;la<=60;la+=30){ const [,y]=proj(la,0);
+    cx.beginPath(); cx.moveTo(0,y); cx.lineTo(cv.width,y); cx.stroke(); }
+  LAND.forEach(ring=>{ cx.beginPath();
+    ring.forEach(([lo,la],i)=>{ const [x,y]=proj(la,lo); i?cx.lineTo(x,y):cx.moveTo(x,y); });
+    cx.closePath(); cx.fillStyle='rgba(60,90,120,.34)'; cx.fill();
+    cx.strokeStyle='rgba(120,170,220,.45)'; cx.lineWidth=1.2*dpr; cx.stroke(); });
+  if(routePts.length===2){
+    cx.beginPath();
+    for(let i=0;i<=64;i++){ const t=i/64;
+      const la = routePts[0].la+(routePts[1].la-routePts[0].la)*t;
+      const lo = routePts[0].lo+(routePts[1].lo-routePts[0].lo)*t;
+      const [x,y]=proj(la,lo); i?cx.lineTo(x,y):cx.moveTo(x,y); }
+    cx.strokeStyle='#f6b73c'; cx.lineWidth=2.4*dpr; cx.stroke();
+  }
+  clusters().forEach(cl=>{
+    const [x,y] = proj(cl.la,cl.lo);
+    if(x<-40||x>cv.width+40||y<-40||y>cv.height+40) return;
+    const rr = (cl.items.length>1? 9 : 5) * dpr * (1+Math.min(1,cl.pop/40));
+    cx.beginPath(); cx.arc(x,y,rr+4*dpr,0,7); cx.fillStyle='rgba(62,207,142,.20)'; cx.fill();
+    cx.beginPath(); cx.arc(x,y,rr,0,7);
+    cx.fillStyle = cl.items.length>1? '#5b8cff' : '#3ecf8e'; cx.fill();
+    if(cl.items.length>1){ cx.fillStyle='#fff'; cx.font='bold '+(10*dpr)+'px system-ui';
+      cx.textAlign='center'; cx.textBaseline='middle'; cx.fillText(cl.items.length, x, y); cx.textAlign='left'; }
+    else if(view.get().z>1.6){ cx.fillStyle='rgba(220,228,244,.9)'; cx.font=(11*dpr)+'px system-ui';
+      cx.fillText(cl.items[0].n, x+rr+4*dpr, y+4*dpr); }
+  });
+  $('#zoomTag').textContent = 'zoom '+view.get().z.toFixed(2)+' · '+clusters().length+' clusters';
+}
+cv.addEventListener('pointerdown', e=>{ drag=[e.clientX,e.clientY]; cv.setPointerCapture(e.pointerId); cv.style.cursor='grabbing';
+  if(routeMode){ const r0=cv.getBoundingClientRect(), k=cv.width/r0.width;
+    const [la,lo] = unproj((e.clientX-r0.left)*k, (e.clientY-r0.top)*k);
+    const near = CITIES.map(c=>({c,d:km({la,lo},c)})).sort((a,b)=>a.d-b.d)[0].c;
+    routePts = routePts.length>=2 ? [near] : [...routePts, near];
+    routeInfo(); draw(); }});
+addEventListener('pointerup', ()=>{ drag=null; cv.style.cursor='grab'; });
+cv.addEventListener('pointermove', e=>{
+  const r0=cv.getBoundingClientRect(), k=cv.width/r0.width;
+  const [la,lo] = unproj((e.clientX-r0.left)*k, (e.clientY-r0.top)*k);
+  $('#coord').textContent = la.toFixed(2)+'°, '+lo.toFixed(2)+'°';
+  if(!drag||routeMode) return;
+  const v=view.get(), s=cv.width/360*v.z/k;
+  view.set({...v, cx: v.cx-(e.clientX-drag[0])/s, cy: v.cy+(e.clientY-drag[1])/s});
+  drag=[e.clientX,e.clientY]; draw(); });
+cv.addEventListener('wheel', e=>{ e.preventDefault();
+  const v=view.get(); view.set({...v, z: Math.max(0.8, Math.min(8, v.z*(e.deltaY<0?1.15:0.87)))}); draw(); },{passive:false});
+function routeInfo(){
+  if(routePts.length<2) return fill($('#routeBox'),
+    h('p.small.muted', routeMode? 'Click two points on the map.' : 'Press “Measure route”, then click two points.'));
+  const d = km(routePts[0],routePts[1]);
+  fill($('#routeBox'),
+    h('div.row',{style:{justifyContent:'space-between'}},h('span.small.muted','From'),h('span.b',routePts[0].n)),
+    h('div.row',{style:{justifyContent:'space-between'}},h('span.small.muted','To'),h('span.b',routePts[1].n)),
+    h('hr'),
+    h('div.row',{style:{justifyContent:'space-between'}},h('span.b','Great-circle'),
+      h('span.b.num',fmt.n(d,0)+' km')),
+    h('div.row',{style:{justifyContent:'space-between'}},h('span.small.muted','Nautical miles'),
+      h('span.num',fmt.n(d*0.539957,0))),
+    h('div.row',{style:{justifyContent:'space-between'}},h('span.small.muted','At 850 km/h'),
+      h('span.num',fmt.n(d/850,1)+' h')));
+  submit('map.route',{from:routePts[0].n,to:routePts[1].n,km:Math.round(d)}).catch(()=>{});
+}
+function places(filter){
+  const d = CITIES.filter(c=>!filter || c.n.toLowerCase().includes(filter))
+    .sort((a,b)=>b.pop-a.pop);
+  fill($('#places'), d.map(c=>h('li',{style:{cursor:'pointer'},
+    onclick:()=>{ view.set(v=>({...v, cx:c.lo, cy:c.la, z:Math.max(v.z,3)})); draw(); }},
+    h('span',{style:{width:'8px',height:'8px',borderRadius:'50%',background:'var(--ok)',flex:'none'}}),
+    h('div',{style:{minWidth:0}}, h('div.small.b',c.n),
+      h('div.small.muted',c.la.toFixed(2)+'°, '+c.lo.toFixed(2)+'°')),
+    h('span.spacer'), h('span.tag',c.pop+'M'))));
+}
+$('#q').oninput = e => places(e.target.value.toLowerCase());
+$('#route').onclick = () => { routeMode=!routeMode; routePts=[];
+  $('#route').classList.toggle('p', routeMode);
+  cv.style.cursor = routeMode? 'crosshair':'grab'; routeInfo(); draw(); };
+$('#reset').onclick = () => { view.set({cx:10,cy:20,z:1}); routePts=[]; routeInfo(); draw(); };
+addEventListener('resize', draw);
+places(''); routeInfo(); draw();
+</script>

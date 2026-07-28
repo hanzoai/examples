@@ -1,0 +1,104 @@
+<!--hz {"title":"Careers","archetype":"job board","creator":"web","desc":"Job board: faceted search over roles, salary-band filter, detail pages with structured requirements, saved roles, and an application form with file attachment written to @hanzo/base.","nav":[["#/","Roles"],["#/saved","Saved"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Careers</h1><span class="tag" id="n"></span>
+  <span class="spacer"></span>
+  <input id="q" placeholder="Search roles…" style="max-width:230px">
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:16px">Every role, team and salary band on this page is invented for demonstration. No position is open and no application is read by anyone.</p>
+<script>
+const {h,fill,$,store,rng,range,pick,uid,fmt,toast,submit,route,wire} = hz;
+const r = rng(3050);
+const ROLES = [
+ ['Release Engineer','Platform','Remote (EU)','full-time',[130,175],'Own the path from a manifest to a live URL: content addressing, activation and rollback.',
+  ['Ship and operate a service with a hard correctness requirement','Reason about atomicity and partial failure','Comfortable in Go'],
+  ['Design the retention and garbage-collection policy for releases','Make activation verify bytes before it flips','Reduce cold-start latency on the serving path']],
+ ['Frontend Engineer, Console','Web','Amsterdam','full-time',[110,150],'Build the surfaces people use to publish, inspect and roll back.',
+  ['Strong CSS and layout fundamentals','Care about keyboard and screen-reader paths','Have shipped a design system or lived with one'],
+  ['Own the usage and billing views','Take the domain-binding flow from confusing to obvious','Keep the bundle honest']],
+ ['Data Engineer','Data','Remote (global)','full-time',[125,165],'Model the data plane every published page writes to.',
+  ['Have designed row-level authorisation you would defend in a review','SQL beyond the basics','Pragmatic about schema change'],
+  ['Design submission quotas','Build the records browser','Make the export path boring']],
+ ['Site Reliability Engineer','SRE','Remote (US)','full-time',[135,180],'Keep the edge fast and the incidents short.',
+  ['Run production without heroics','Instrument before you optimise','Write the runbook you would want at 3am'],
+  ['Own cache policy at the edge','Cut mean time to detect','Publish a status page that is worth reading']],
+ ['Technical Writer','Web','Remote (EU)','contract',[80,110],'Documentation that is read because it is correct, not because it is mandatory.',
+  ['Write clearly about systems you had to learn','Read code to check a claim','Own an information architecture'],
+  ['Document the sites surface','Keep the API reference executable','Retire pages nobody reads']],
+ ['Product Designer','Web','Berlin','full-time',[105,140],'Design the smallest interface that makes the system legible.',
+  ['Systems thinking over screen decoration','Prototype in the browser','Argue for deleting features'],
+  ['Simplify the release history view','Design the rollback confirmation','Bring one visual language to every surface']],
+ ['Security Engineer','Platform','Remote (global)','full-time',[145,190],'Make the safe path the easy one.',
+  ['Threat-model a multi-tenant system','Know why reserved subdomains are a control','Review authorisation rules critically'],
+  ['Own the reserved-label invariant','Audit collection rules','Build abuse detection for open-create endpoints']],
+ ['Support Engineer','SRE','Remote (APAC)','full-time',[85,115],'Turn a confused report into a reproducible bug.',
+  ['Patient and precise in writing','Read logs and mean it','Escalate with evidence'],
+  ['Own first response','Feed recurring issues back into docs','Keep the SLA honest']],
+].map(([t,team,loc,type,band,sum,reqs,work],i)=>({id:uid(),t,team,loc,type,band,sum,reqs,work,
+  at: Date.now()-Math.round(r()*40)*864e5, hue:[210,268,150,32,340,190,110,300][i]}));
+const saved = store('careers.saved', []);
+const view = $('#view');
+let q='', team='All', type='All', minPay=80;
+const TEAMS = ['All',...new Set(ROLES.map(x=>x.team))];
+
+function list(only){
+  const d = (only||ROLES).filter(x=>
+    (!q || (x.t+' '+x.team+' '+x.sum).toLowerCase().includes(q)) &&
+    (team==='All'||x.team===team) && (type==='All'||x.type===type) && x.band[1]>=minPay);
+  $('#n').textContent = d.length+' open role'+(d.length===1?'':'s');
+  fill(view, h('div.split',
+    h('div.pane',h('header','Filter'),h('div.body.col',
+      h('div.field',{style:{margin:0}},h('label','Team'),
+        h('select',{onchange:e=>{team=e.target.value;list();}},TEAMS.map(t=>h('option',{selected:t===team},t)))),
+      h('div.field',{style:{margin:0}},h('label','Type'),
+        h('select',{onchange:e=>{type=e.target.value;list();}},['All','full-time','contract'].map(t=>h('option',{selected:t===type},t)))),
+      h('div.field',{style:{margin:0}},h('label','Minimum top of band · $'+minPay+'k'),
+        h('input',{type:'range',min:80,max:190,step:5,value:minPay,oninput:e=>{minPay=+e.target.value;list();}})),
+      h('button.g',{onclick:()=>{q='';team='All';type='All';minPay=80;$('#q').value='';list();}},'Clear filters'))),
+    h('div.col', d.length? d.map(x=>{
+      const on = saved.get().includes(x.id);
+      return h('div.card',
+        h('div.row',{style:{gap:'10px',alignItems:'flex-start'}},
+          h('div',{style:{width:'42px',height:'42px',borderRadius:'9px',flex:'none',
+            background:`linear-gradient(135deg,hsl(${x.hue} 50% 40%),hsl(${(x.hue+40)%360} 46% 26%))`}}),
+          h('div',{style:{minWidth:0,cursor:'pointer'},onclick:()=>{location.hash='#/r/'+x.id;}},
+            h('h3',{style:{margin:0}},x.t),
+            h('div.small.muted',{style:{margin:'3px 0 7px'}},x.sum),
+            h('div.row',{style:{gap:'5px'}}, h('span.tag.acc',x.team), h('span.tag',x.loc),
+              h('span.tag',x.type), h('span.tag','$'+x.band[0]+'k – $'+x.band[1]+'k'))),
+          h('span.spacer'),
+          h('button.sm',{onclick:()=>{ saved.set(v=>on? v.filter(i=>i!==x.id):[...v,x.id]); list(only); }},
+            on?'★ Saved':'☆ Save')));
+    }) : h('div.empty','No roles match these filters.'))));
+}
+function detail(id){
+  const x = ROLES.find(r0=>r0.id===id); if(!x) return list();
+  const f = h('form',
+    h('div.row',h('div.field',{style:{flex:1}},h('label','Name'),h('input',{name:'name',required:true})),
+      h('div.field',{style:{flex:1}},h('label','Email'),h('input',{name:'email',type:'email',required:true,placeholder:'you@example.invalid'}))),
+    h('div.field',h('label','Link to work (optional)'),h('input',{name:'link',placeholder:'https://…'})),
+    h('div.field',h('label','Why this role?'),h('textarea',{name:'why',required:true,style:{minHeight:'110px'}})),
+    h('div.field',h('label','CV'),h('input',{type:'file',id:'cv'})),
+    h('button.p',{type:'submit',style:{width:'100%'}},'Apply'));
+  wire(f,'careers.application',()=>{ toast('Application recorded — nothing is sent anywhere'); });
+  fill(view, h('div.split.r',
+    h('div.pane',h('div.body',
+      h('a.small.muted',{href:'#/'},'‹ All roles'),
+      h('h1',{style:{marginTop:'8px'}},x.t),
+      h('div.row',{style:{gap:'6px',marginBottom:'14px'}}, h('span.tag.acc',x.team),
+        h('span.tag',x.loc), h('span.tag',x.type), h('span.tag','$'+x.band[0]+'k – $'+x.band[1]+'k'),
+        h('span.small.muted','posted '+fmt.ago(x.at))),
+      h('p',{style:{fontSize:'16px'}},x.sum),
+      h('h2','What you will do'), h('ul.list',{style:{border:'1px solid var(--line)',borderRadius:'8px'}},
+        x.work.map(w=>h('li',h('span.small','→  '+w)))),
+      h('h2',{style:{marginTop:'16px'}},'What we look for'),
+      h('ul.list',{style:{border:'1px solid var(--line)',borderRadius:'8px'}},
+        x.reqs.map(w=>h('li',h('span.small','·  '+w)))),
+      h('p.hz-note',{style:{marginTop:'14px'}},'This posting is illustrative. The bands, teams and locations are invented to demonstrate the layout of a job board.'))),
+    h('div.pane',h('header','Apply'),h('div.body',f))));
+  scrollTo({top:0});
+}
+$('#q').oninput = e => { q = e.target.value.toLowerCase(); list(); };
+route({'':()=>list(), 'saved':()=>list(ROLES.filter(x=>saved.get().includes(x.id))),
+       'r/:id':a=>detail(a.id), '*':()=>list()});
+</script>

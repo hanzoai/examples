@@ -1,0 +1,112 @@
+<!--hz {"title":"Poll","archetype":"survey / live poll","creator":"data","desc":"Live polling and survey builder: multiple question types, a presenter view whose results update instantly across tabs, per-question charts and CSV export of responses.","nav":[["#/","Vote"],["#/results","Results"],["#/build","Build"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Poll</h1><span class="tag acc" id="live">1 device</span>
+  <span class="spacer"></span><span class="small muted" id="cnt"></span>
+  <button id="csv">Export CSV</button><button class="g" id="wipe">Clear responses</button>
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:16px">Open a second tab and vote: results update in both instantly over BroadcastChannel. Responses are also written to @hanzo/base.</p>
+<script>
+const {h,fill,$,store,uid,fmt,bars,donut,toast,submit,route,modal} = hz;
+const QS = store('poll.qs', [
+  {id:'q1', t:'Which part of deploying do you find hardest?', type:'single',
+   opts:['Build configuration','Environment parity','Rollback','Custom domains','Nothing — it is fine']},
+  {id:'q2', t:'Which of these do you use today?', type:'multi',
+   opts:['Static hosting','Serverless functions','Containers','A build server','A CDN you configure yourself']},
+  {id:'q3', t:'How confident are you in your rollback path?', type:'scale', opts:['1','2','3','4','5']},
+  {id:'q4', t:'What would you want fixed first?', type:'text', opts:[]},
+]);
+const res = store('poll.res', []);
+const voted = store('poll.voted', {});
+const bc = 'BroadcastChannel' in self ? new BroadcastChannel('hz-poll') : null;
+const me = uid();
+const peers = new Map([[me, Date.now()]]);
+const view = $('#view');
+
+function count(){ $('#cnt').textContent = res.get().length+' responses';
+  $('#live').textContent = peers.size + (peers.size===1?' device':' devices'); }
+function vote(){
+  const v = voted.get();
+  fill(view, h('div.col', QS.get().map(q => {
+    const done = v[q.id] !== undefined;
+    const body = q.type==='text'
+      ? (()=>{ const ta=h('textarea',{placeholder:'Type your answer…',value:done?v[q.id]:''});
+          return h('div', ta, h('button.p',{style:{marginTop:'8px'},onclick:()=>cast(q,ta.value.trim())},
+            done?'Update answer':'Submit')); })()
+      : q.type==='multi'
+      ? (()=>{ const boxes = q.opts.map(o=>h('label.inline',{style:{gap:'8px',padding:'6px 0'}},
+            h('input',{type:'checkbox',value:o,checked:done&&v[q.id].includes(o)}), h('span',o)));
+          return h('div', boxes, h('button.p',{style:{marginTop:'8px'},onclick:()=>cast(q,
+            boxes.filter(b=>b.firstChild.checked).map(b=>b.firstChild.value))}, done?'Update':'Submit')); })()
+      : h('div.col',{style:{gap:'6px'}}, q.opts.map(o=>h('button'+(done&&v[q.id]===o?'.p':''),
+          {style:{justifyContent:'flex-start'},onclick:()=>cast(q,o)}, o)));
+    return h('div.pane', h('header', q.t, h('span.spacer'),
+      h('span.tag'+(done?'.ok':''), done?'answered':q.type)), h('div.body', body));
+  })));
+}
+function cast(q, val){
+  if(val===''||val===undefined||(Array.isArray(val)&&!val.length)) return toast('Pick something first');
+  voted.set(v=>({...v,[q.id]:val}));
+  const rec = {id:uid(), q:q.id, val, at:Date.now(), by:me};
+  res.set(v=>[...v.filter(x=>!(x.by===me && x.q===q.id)), rec]);
+  bc?.postMessage({t:'vote', rec, from:me});
+  submit('poll.response',{question:q.t, value:val}).catch(()=>{});
+  count(); vote(); toast('Recorded');
+}
+function results(){
+  const all = res.get();
+  fill(view, h('div.col', QS.get().map(q => {
+    const mine = all.filter(x=>x.q===q.id);
+    if(q.type==='text') return h('div.pane', h('header',q.t, h('span.spacer'), h('span.tag',mine.length+' answers')),
+      mine.length ? h('ul.list', mine.slice(-12).reverse().map(x=>h('li',
+        h('div',h('div.small',x.val), h('div.small.muted',fmt.ago(x.at))))))
+      : h('div.empty','No answers yet'));
+    const tally = q.opts.map(o=>({k:o, v: mine.filter(x=>Array.isArray(x.val)? x.val.includes(o) : x.val===o).length}));
+    const tot = mine.length || 1;
+    return h('div.pane', h('header', q.t, h('span.spacer'), h('span.tag',mine.length+' responses')),
+      h('div.body', q.type==='single' && tally.some(t=>t.v)
+        ? h('div.split',{style:{gridTemplateColumns:'1fr'}},
+            bars(tally.map(t=>({...t, f: t.v+'  ·  '+(t.v/tot*100).toFixed(0)+'%'}))),
+            h('div',{style:{marginTop:'12px'}}, donut(tally.filter(t=>t.v))))
+        : bars(tally.map(t=>({...t, f: t.v+'  ·  '+(t.v/tot*100).toFixed(0)+'%'})))));
+  })));
+}
+function build(){
+  fill(view, h('div.pane', h('header','Questions', h('span.spacer'),
+      h('button.p.sm',{onclick:addQ},'+ Question')),
+    h('ul.list', QS.get().map((q,i)=>h('li',
+      h('span.tag',i+1),
+      h('div',{style:{minWidth:0}}, h('div.b',q.t),
+        h('div.small.muted', q.type+(q.opts.length? ' · '+q.opts.join(' / ') : ''))),
+      h('span.spacer'),
+      h('button.g.sm',{onclick:()=>{QS.set(v=>v.filter(x=>x.id!==q.id)); build();}},'✕')))),
+    h('div.body', h('p.hz-note',{style:{margin:0}},'Editing the questions changes the vote page and the results page immediately — both are derived from this one list.'))));
+}
+function addQ(){
+  const t=h('input',{placeholder:'Question'}), ty=h('select',['single','multi','scale','text'].map(x=>h('option',x)));
+  const o=h('input',{placeholder:'Option A, Option B, Option C'});
+  modal('New question', h('div', h('div.field',h('label','Question'),t),
+    h('div.field',h('label','Type'),ty), h('div.field',h('label','Options (comma separated)'),o)),
+    ()=>{ if(!t.value.trim()) return;
+      const opts = ty.value==='text' ? [] : ty.value==='scale' ? ['1','2','3','4','5']
+        : o.value.split(',').map(s=>s.trim()).filter(Boolean);
+      QS.set(v=>[...v,{id:uid(),t:t.value.trim(),type:ty.value,opts}]); build(); }, 'Add');
+}
+$('#csv').onclick = () => {
+  const rows = res.get().map(x=>[x.q, Array.isArray(x.val)?x.val.join('|'):x.val, new Date(x.at).toISOString()]);
+  if(!rows.length) return toast('No responses to export');
+  const csv = ['question,answer,at', ...rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(','))].join('\n');
+  h('a',{download:'poll.csv',href:URL.createObjectURL(new Blob([csv],{type:'text/csv'}))}).click();
+};
+$('#wipe').onclick = () => { res.set([]); voted.set({}); bc?.postMessage({t:'clear',from:me});
+  count(); location.hash.includes('results')?results():vote(); toast('Responses cleared'); };
+if(bc) bc.onmessage = e => { const d=e.data; if(d.from===me) return;
+  peers.set(d.from, Date.now());
+  if(d.t==='vote') res.set(v=>[...v.filter(x=>!(x.by===d.rec.by&&x.q===d.rec.q)), d.rec]);
+  if(d.t==='clear'){ res.set([]); voted.set({}); }
+  count(); if(location.hash.includes('results')) results(); };
+setInterval(()=>{ bc?.postMessage({t:'ping',from:me});
+  [...peers].forEach(([k,t])=>{ if(k!==me && Date.now()-t>6000) peers.delete(k); }); count();
+  if(location.hash.includes('results')) results(); }, 3000);
+route({'':()=>{count();vote();}, 'results':()=>{count();results();}, 'build':()=>{count();build();}, '*':()=>{count();vote();}});
+</script>

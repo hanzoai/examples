@@ -1,0 +1,100 @@
+<!--hz {"title":"Current","archetype":"social feed","creator":"web","desc":"Social timeline: composer with character budget, like/repost/reply counters, threaded replies, follow suggestions and an infinite-scroll feed.","nav":[["#/","Home"],["#/likes","Liked"]]} -->
+<div class="split r">
+  <div class="col">
+    <div class="pane"><header>What's happening</header>
+      <div class="body">
+        <form id="cw">
+          <textarea id="txt" name="text" placeholder="Share an update…" maxlength="280"></textarea>
+          <div class="row" style="margin-top:8px">
+            <span class="small muted" id="left">280</span><span class="spacer"></span>
+            <button class="p" type="submit">Post</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    <div id="feed" class="col"></div>
+    <div id="more" class="empty">Scroll for more</div>
+  </div>
+  <div class="col">
+    <div class="pane"><header>Trending topics</header><ul class="list" id="trend"></ul></div>
+    <div class="pane"><header>Accounts to follow</header><ul class="list" id="who"></ul></div>
+    <div class="pane"><div class="body"><p class="hz-note" style="margin:0">Every account, post and counter on this page is synthetic demo content. Nothing here reflects a real person or real engagement.</p></div></div>
+  </div>
+</div>
+<script>
+const {h,fill,$,store,rng,range,pick,uid,fmt,avatar,toast,submit} = hz;
+const r = rng(606);
+const HANDLES = ['@nightbuild','@ops_diary','@tinyrepo','@sdf_notes','@cold_start','@rasterline','@kv_store','@pager_duty'];
+const NAMES = ['Nightly Build','Ops Diary','Tiny Repo','SDF Notes','Cold Start','Rasterline','KV Store','Pager Duty'];
+const POSTS = [
+ 'Shipped a change that removes 400 lines and adds none. Best kind of release.',
+ 'Reminder: a rollback that requires a rebuild is not a rollback.',
+ 'Spent the morning discovering the bug was a lockfile that never named this architecture.',
+ 'Content-addressed releases mean the same input always produces the same id. Deploys became boring, which is the goal.',
+ 'Hot take: most dashboards would be better as one number and a sparkline.',
+ 'The fastest query is the one you cached. The second fastest is the one you did not write.',
+ 'Wrote a raymarcher in a fragment shader instead of doing the thing I was supposed to do.',
+ 'If your status page is hosted on the thing it reports on, it is not a status page.',
+ 'Today I learned that a viewport meta tag before the doctype puts the page in quirks mode.',
+ 'Deleted a feature flag that had been permanently on since 2023. Small joys.',
+ 'A queue with no dead-letter policy is a place messages go to be forgotten.',
+ 'Refactor rule: if the diff is mostly moving code, split it out from the diff that changes behaviour.',
+];
+const seed = range(24, i => ({
+  id: uid(), who: i%8, t: POSTS[i%POSTS.length], at: Date.now()-i*Math.round(20+r()*180)*6e4,
+  likes: Math.round(r()*180), reposts: Math.round(r()*40), replies: [],
+}));
+const db = store('current', seed);
+const liked = store('current.liked', []);
+let shown = 8;
+
+$('#txt').addEventListener('input', e => $('#left').textContent = 280 - e.target.value.length);
+$('#cw').onsubmit = async e => {
+  e.preventDefault(); const t = $('#txt').value.trim(); if(!t) return;
+  db.set(v=>[{id:uid(),who:-1,t,at:Date.now(),likes:0,reposts:0,replies:[]},...v]);
+  $('#txt').value=''; $('#left').textContent=280; render();
+  try{ await submit('current.post',{text:t}); toast('Posted via @hanzo/base'); }catch(err){ toast('Posted locally'); }
+};
+function post(p){
+  const me = p.who<0, name = me?'You':NAMES[p.who], handle = me?'@you':HANDLES[p.who];
+  const isLiked = liked.get().includes(p.id);
+  const rep = h('div.col',{style:{gap:'6px',marginTop:'8px',display:'none'}},
+    h('div.inline', h('input',{placeholder:'Post your reply…',
+      onkeydown:e=>{ if(e.key==='Enter'&&e.target.value.trim()){
+        db.set(v=>v.map(x=>x.id===p.id?{...x,replies:[...x.replies,{t:e.target.value.trim(),at:Date.now()}]}:x));
+        submit('current.reply',{to:p.id,text:e.target.value.trim()}).catch(()=>{}); render(); }}})));
+  const el = h('div.card',
+    h('div.row',{style:{gap:'10px',alignItems:'flex-start'}},
+      avatar(name,38),
+      h('div',{style:{flex:1,minWidth:0}},
+        h('div.row',{style:{gap:'6px'}},h('span.b',name),h('span.small.muted',handle),
+          h('span.small.muted','· '+fmt.ago(p.at)), me&&h('span.tag.acc','you')),
+        h('div',{style:{margin:'5px 0 9px',lineHeight:'1.5'}},p.t),
+        p.replies.length? h('div.col',{style:{gap:'6px',margin:'0 0 9px',borderLeft:'2px solid var(--line)',paddingLeft:'10px'}},
+          p.replies.map(rp=>h('div.small',h('span.b','You '),rp.t,h('span.muted',' · '+fmt.ago(rp.at))))):null,
+        h('div.row',{style:{gap:'14px'}},
+          h('button.g.sm',{onclick:()=>{rep.style.display=rep.style.display==='none'?'flex':'none';}},'💬 '+p.replies.length),
+          h('button.g.sm',{onclick:()=>{db.set(v=>v.map(x=>x.id===p.id?{...x,reposts:x.reposts+1}:x));render();}},'🔁 '+p.reposts),
+          h('button.g.sm',{style:{color:isLiked?'var(--bad)':''},onclick:()=>{
+            liked.set(v=>isLiked?v.filter(x=>x!==p.id):[...v,p.id]);
+            db.set(v=>v.map(x=>x.id===p.id?{...x,likes:x.likes+(isLiked?-1:1)}:x)); render();}},
+            (isLiked?'♥ ':'♡ ')+p.likes)),
+        rep)));
+  return el;
+}
+function render(){
+  const src = location.hash.includes('likes') ? db.get().filter(p=>liked.get().includes(p.id)) : db.get();
+  fill($('#feed'), src.length? src.slice(0,shown).map(post) : h('div.empty','Nothing here yet.'));
+  $('#more').style.display = src.length>shown ? '' : 'none';
+}
+addEventListener('hashchange', ()=>{shown=8;render();});
+addEventListener('scroll', () => {
+  if(innerHeight+scrollY >= document.body.offsetHeight-300 && shown < db.get().length){ shown+=6; render(); }
+});
+fill($('#trend'), [['#deploys',3120],['#rollback',1840],['#webgl',1260],['#sqlite',980],['#coldstart',640]]
+  .map(([t,n])=>h('li',h('div',h('div.b',t),h('div.small.muted',fmt.n(n)+' posts in the demo dataset')))));
+fill($('#who'), range(4,i=>h('li', avatar(NAMES[i+4],30),
+  h('div',{style:{minWidth:0}},h('div.b',NAMES[i+4]),h('div.small.muted',HANDLES[i+4])),
+  h('span.spacer'), h('button.sm',{onclick:e=>{e.target.textContent='Following';e.target.classList.add('p');}},'Follow'))));
+render();
+</script>

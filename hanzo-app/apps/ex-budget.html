@@ -1,0 +1,126 @@
+<!--hz {"title":"Budget","archetype":"personal finance","creator":"apps","desc":"Personal budgeting: an envelope allocator that must balance, transactions with auto-categorisation rules, month-over-month spend chart, savings-rate calculation and a runway projection.","nav":[["#/","Overview"],["#/tx","Transactions"],["#/envelopes","Envelopes"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Budget</h1><span class="tag" id="kpi"></span>
+  <span class="spacer"></span>
+  <select id="month" style="max-width:150px"></select>
+  <button class="p" id="add">+ Transaction</button>
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:16px">Amounts, merchants and balances are synthetic. Nothing here connects to a bank; the categorisation rules and the arithmetic are real.</p>
+<script>
+const {h,fill,$,store,rng,range,pick,uid,fmt,area,bars,donut,grid,modal,toast,submit,route} = hz;
+const r = rng(9753);
+const CATS = [['rent','Rent',1750],['food','Groceries',480],['dining','Eating out',220],
+  ['transport','Transport',140],['utilities','Utilities',180],['health','Health',120],
+  ['fun','Fun',200],['saving','Saving',900]];
+const RULES = [[/rent|landlord/i,'rent'],[/market|grocer|coop|aldi/i,'food'],[/cafe|bar|restaurant|kitchen/i,'dining'],
+  [/rail|metro|taxi|fuel/i,'transport'],[/energy|water|broadband|mobile/i,'utilities'],
+  [/pharmacy|clinic|gym/i,'health'],[/cinema|books|games|music/i,'fun'],[/transfer to savings/i,'saving']];
+const MERCH = ['Landlord BV','City Market','Corner Grocer','Rail Europe','Metro Card','Blue Cafe','Nightjar Kitchen',
+  'Energy Co','Broadband Ltd','Mobile Ltd','Pharmacy 24','City Gym','Cinema One','Books & Co','Transfer to savings'];
+const INCOME = 4200;
+const MONTHS = range(6, i => { const d = new Date(); d.setMonth(d.getMonth()-5+i); return d.toISOString().slice(0,7); });
+const seed = MONTHS.flatMap(m => range(26, () => {
+  const merch = pick(r, MERCH);
+  const cat = RULES.find(([re])=>re.test(merch))?.[1] || 'fun';
+  const base = CATS.find(c=>c[0]===cat)[2];
+  return {id:uid(), month:m, at: m+'-'+String(1+Math.floor(r()*27)).padStart(2,'0'),
+    merch, cat, amount: +(base/ (cat==='rent'?1:6) * (0.4+r()*1.5)).toFixed(2)};
+}));
+const tx = store('budget.tx', seed);
+const env = store('budget.env', Object.fromEntries(CATS.map(([k,,v])=>[k,v])));
+const view = $('#view');
+let month = MONTHS.at(-1);
+fill($('#month'), MONTHS.map(m=>h('option',{value:m,selected:m===month},
+  new Date(m+'-01').toLocaleDateString('en-US',{month:'long',year:'numeric'}))));
+$('#month').onchange = e => { month = e.target.value; go(); };
+
+const forMonth = m => tx.get().filter(t=>t.month===m);
+const spent = m => forMonth(m).reduce((a,t)=>a+t.amount,0);
+const byCat = m => CATS.map(([k,label])=>({k:label, code:k,
+  v: forMonth(m).filter(t=>t.cat===k).reduce((a,t)=>a+t.amount,0)}));
+function kpi(){ const s=spent(month), save=INCOME-s;
+  $('#kpi').textContent = fmt.money(s)+' spent · '+fmt.money(save)+' left of '+fmt.money(INCOME); }
+function overview(){
+  const s = spent(month), rate = (INCOME-s)/INCOME*100;
+  const series = MONTHS.map(spent);
+  const cats = byCat(month);
+  const allocated = Object.values(env.get()).reduce((a,b)=>a+b,0);
+  fill(view,
+    h('div.grid.k4',{style:{marginBottom:'16px'}},
+      h('div.stat',h('div.k','Income'),h('div.v',fmt.money(INCOME))),
+      h('div.stat',h('div.k','Spent'),h('div.v',fmt.money(s))),
+      h('div.stat',h('div.k','Savings rate'),h('div.v.'+(rate>15?'up':'down'),rate.toFixed(1)+'%')),
+      h('div.stat',h('div.k','Runway at this rate'),h('div.v', s>0? (fmt.n(12000/s,1)+' mo') : '∞'))),
+    h('div.split.r',
+      h('div.pane',h('header','Spend by month'),h('div.body',
+        area(series, MONTHS.map(m=>new Date(m+'-01').toLocaleDateString('en-US',{month:'short'}))))),
+      h('div.col',
+        h('div.pane',h('header','Where it went'),h('div.body', donut(cats.filter(c=>c.v>0)))),
+        h('div.pane',h('header','Envelope status'),h('div.body.col',
+          cats.map(c=>{ const cap = env.get()[c.code]||0, pct = cap? c.v/cap*100 : 0;
+            return h('div',
+              h('div.row',h('span.small',c.k),h('span.spacer'),
+                h('span.small.num',fmt.money(c.v)+' / '+fmt.money(cap))),
+              h('div.bar',{style:{marginTop:'4px'}},h('i',{style:{width:Math.min(100,pct)+'%',
+                background: pct>100?'var(--bad)':pct>85?'var(--warn)':'var(--ok)'}}))); }),
+          h('div.small.muted',{style:{marginTop:'6px'}},
+            'Allocated '+fmt.money(allocated)+' of '+fmt.money(INCOME)+
+            (allocated>INCOME? ' — over-allocated by '+fmt.money(allocated-INCOME) : '')))))));
+}
+function txView(){
+  const rows = forMonth(month).sort((a,b)=>a.at<b.at?1:-1);
+  fill(view, h('div.pane', grid([
+    {k:'at',t:'Date',w:'110px'},
+    {k:'merch',t:'Merchant',cell:t=>h('div',h('div.b',t.merch),
+      h('div.small.muted','auto-categorised by rule'))},
+    {k:'cat',t:'Category',cell:t=>h('select',{style:{fontSize:'12px',padding:'3px 6px'},
+      onclick:e=>e.stopPropagation(),
+      onchange:e=>{ tx.set(v=>v.map(x=>x.id===t.id?{...x,cat:e.target.value}:x)); kpi(); txView(); }},
+      CATS.map(([k,l])=>h('option',{value:k,selected:k===t.cat},l)))},
+    {k:'amount',t:'Amount',num:true,cell:t=>fmt.money(t.amount)},
+  ], rows, {placeholder:'Search merchant…'})));
+}
+function envelopes(){
+  const e = env.get(), allocated = Object.values(e).reduce((a,b)=>a+b,0);
+  const set = (k,v) => { env.set(o=>({...o,[k]:Math.max(0,v)})); envelopes(); };
+  fill(view, h('div.split.r',
+    h('div.pane',h('header','Allocate every euro', h('span.spacer'),
+      h('span.tag '+(allocated===INCOME?'ok':allocated>INCOME?'bad':'warn'),
+        allocated>INCOME? fmt.money(allocated-INCOME)+' over' :
+        allocated<INCOME? fmt.money(INCOME-allocated)+' unallocated' : 'balanced')),
+      h('div.body.col', CATS.map(([k,label])=>h('div.field',{style:{margin:0}},
+        h('label', label+' · '+fmt.money(e[k]||0)),
+        h('div.inline',
+          h('input',{type:'range',min:0,max:2200,step:10,value:e[k]||0,
+            oninput:ev=>set(k, +ev.target.value)}),
+          h('input',{type:'number',value:e[k]||0,style:{width:'96px'},
+            oninput:ev=>set(k, +ev.target.value)})))),
+      h('button.p',{onclick:async()=>{
+        try{ await submit('budget.envelopes', env.get()); toast('Envelopes saved to @hanzo/base'); }
+        catch(err){ toast('Saved locally'); } }},'Save envelopes'))),
+    h('div.pane',h('header','Actual vs planned · '+month),h('div.body',
+      bars(byCat(month).map(c=>({k:c.k, v:c.v, f:fmt.money(c.v)+' of '+fmt.money(e[c.code]||0)})))))));
+}
+$('#add').onclick = () => {
+  const m=h('input',{placeholder:'Merchant'}), a=h('input',{type:'number',step:'0.01',value:'25.00'});
+  const d=h('input',{type:'date',value:month+'-15'});
+  const guess = h('div.small.muted');
+  m.oninput = () => { const c = RULES.find(([re])=>re.test(m.value))?.[1];
+    guess.textContent = c? 'Will be categorised as '+CATS.find(x=>x[0]===c)[1] : 'No rule matches — will go to Fun'; };
+  m.oninput();
+  modal('New transaction', h('div',
+    h('div.field',h('label','Merchant'),m,guess),
+    h('div.row',h('div.field',{style:{flex:1}},h('label','Amount'),a),
+      h('div.field',{style:{flex:1}},h('label','Date'),d))),
+    async () => { if(!m.value.trim()) return;
+      const cat = RULES.find(([re])=>re.test(m.value))?.[1] || 'fun';
+      const t = {id:uid(), month:d.value.slice(0,7), at:d.value, merch:m.value.trim(), cat, amount:+a.value||0};
+      tx.set(v=>[t,...v]); kpi(); go();
+      try{ await submit('budget.tx', t); toast('Transaction saved to @hanzo/base'); }
+      catch(e){ toast('Saved locally'); } }, 'Add');
+};
+const go = () => { kpi(); const at=location.hash.replace(/^#\/?/,'');
+  at==='tx'? txView() : at==='envelopes'? envelopes() : overview(); };
+route({'':go,'tx':go,'envelopes':go,'*':go});
+</script>

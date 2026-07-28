@@ -1,0 +1,99 @@
+<!--hz {"title":"Handbook","archetype":"docs site","creator":"web","desc":"Documentation site: sidebar navigation, on-page table of contents with scroll spy, client-side search with keyboard navigation, copyable code blocks and prev/next paging.","nav":[["#/","Docs"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Handbook</h1>
+  <span class="spacer"></span>
+  <input id="q" placeholder="Search docs… (press /)" style="max-width:280px">
+</div>
+<div id="results" class="pane" style="display:none;margin-bottom:12px"></div>
+<div class="split">
+  <div class="pane"><header>Contents</header><ul class="list" id="side"></ul></div>
+  <div class="split r" style="gap:16px">
+    <article class="pane"><div class="body" id="doc"></div></article>
+    <div class="pane" id="tocpane"><header>On this page</header><ul class="list" id="toc"></ul></div>
+  </div>
+</div>
+<script>
+const {h,fill,$,$$,toast,route,submit} = hz;
+const DOCS = [
+ {id:'start', t:'Getting started', s:[
+   ['Overview','A published site is a set of files served at a subdomain of the platform apex. There is no build server in the path: you upload a manifest of paths and contents, and the platform stores, addresses and serves it.'],
+   ['Your first deploy','Post a manifest to the deploy endpoint. Each entry is a relative path and its full contents. The response carries the live URL, the deployment id and the file list.',
+     'POST /v1/sites/deploy\\n{\\n  "slug": "my-app",\\n  "name": "My app",\\n  "files": [{ "path": "index.html", "content": "<h1>hi</h1>" }]\\n}'],
+   ['What you get','Every published site is reachable over TLS immediately, receives the shared analytics and chat runtime, and gets its own data space.'],
+ ]},
+ {id:'releases', t:'Releases and rollback', s:[
+   ['Content addressing','A release id is derived from the digest of its file manifest. Identical content always yields the same id, so publishing the same bytes twice does not create a second release.'],
+   ['Activation','Publishing creates a release and then activates it. Activation is an atomic pointer flip — readers see either the whole old release or the whole new one, never a mixture.'],
+   ['Rolling back','Because activation is a pointer flip, a rollback is activating an earlier release id. No rebuild, no redeploy, no cache stampede.',
+     'POST /v1/sites/my-app/releases/rel_9c1f2/activate'],
+ ]},
+ {id:'data', t:'Data with @hanzo/base', s:[
+   ['The submissions collection','Every project space carries one collection for generic data capture. Anyone may create a record; reads are restricted to the space owner. That default lets an anonymous published page store a form submission without holding a credential.'],
+   ['Writing a record','The endpoint is served on the site\\u2019s own origin, so there is no cross-origin request and no key in the page.',
+     'await fetch("/v1/base/collections/submissions/records", {\\n  method: "POST",\\n  headers: { "Content-Type": "application/json" },\\n  body: JSON.stringify({ form: "signup", data: { email } })\\n});'],
+ ]},
+ {id:'domains', t:'Domains', s:[
+   ['Default subdomain','A site is served at slug.apex. Reserved labels — api, admin, docs, status and others — can never be claimed, because they are either platform surfaces or phishing-sensitive.'],
+   ['Custom domains','Bind a domain, publish the verification record, and the certificate is issued automatically. Until verification completes the site keeps serving on its default subdomain.'],
+ ]},
+ {id:'limits', t:'Limits', s:[
+   ['Request size','A deploy body is capped at four mebibytes. Large media belongs in object storage and should be referenced, not inlined.'],
+   ['File counts','A single artifact may contain up to five thousand entries; each entry is capped at sixty-four mebibytes.'],
+ ]},
+];
+const FLAT = DOCS.flatMap(d=>d.s.map((s,i)=>({doc:d.id,docT:d.t,i,t:s[0],b:s[1],code:s[2]})));
+let cur = 'start';
+
+fill($('#side'), DOCS.map(d=>h('li',{style:{cursor:'pointer',background:d.id===cur?'var(--bg3)':''},
+  onclick:()=>{location.hash='#/'+d.id;}}, h('span'+(d.id===cur?'.b':''),d.t),
+  h('span.spacer'), h('span.tag',d.s.length))));
+
+function code(src){
+  const pre = h('pre', src);
+  return h('div',{style:{position:'relative'}}, pre,
+    h('button.sm',{style:{position:'absolute',top:'8px',right:'8px'},
+      onclick:()=>{navigator.clipboard?.writeText(src); toast('Copied');}},'Copy'));
+}
+function render(id){
+  const d = DOCS.find(x=>x.id===id) || DOCS[0]; cur = d.id;
+  const idx = DOCS.indexOf(d);
+  fill($('#doc'), h('div',
+    h('div.small.muted','Handbook / '+d.t), h('h1',d.t),
+    d.s.map((s,i)=>h('section',{id:'s'+i,style:{scrollMarginTop:'70px'}},
+      h('h2',{style:{marginTop:'22px'}},s[0]), h('p',s[1]), s[2]?code(s[2]):null)),
+    h('hr'),
+    h('div.row',
+      idx>0 ? h('a.btn',{href:'#/'+DOCS[idx-1].id},'‹ '+DOCS[idx-1].t) : h('span'),
+      h('span.spacer'),
+      idx<DOCS.length-1 ? h('a.btn',{href:'#/'+DOCS[idx+1].id},DOCS[idx+1].t+' ›') : h('span'))));
+  fill($('#toc'), d.s.map((s,i)=>h('li',{style:{cursor:'pointer'},
+    onclick:()=>$('#s'+i).scrollIntoView({behavior:'smooth'})}, h('span.small','#s'+i+' · '), h('span.small',s[0]))));
+  fill($('#side'), DOCS.map(x=>h('li',{style:{cursor:'pointer',background:x.id===cur?'var(--bg3)':''},
+    onclick:()=>{location.hash='#/'+x.id;}}, h('span'+(x.id===cur?'.b':''),x.t),
+    h('span.spacer'), h('span.tag',x.s.length))));
+  scrollTo({top:0});
+  const secs = $$('#doc section');
+  const spy = () => { let a = 0;
+    secs.forEach((s,i)=>{ if(s.getBoundingClientRect().top < 120) a = i; });
+    $$('#toc li').forEach((li,i)=>li.style.background = i===a?'var(--bg3)':''); };
+  removeEventListener('scroll', window.__spy); window.__spy = spy; addEventListener('scroll', spy); spy();
+}
+$('#q').oninput = e => {
+  const q = e.target.value.trim().toLowerCase();
+  const box = $('#results');
+  if(q.length<2){ box.style.display='none'; return; }
+  const hits = FLAT.filter(s => (s.t+' '+s.b).toLowerCase().includes(q)).slice(0,8);
+  box.style.display='';
+  fill(box, h('ul.list', hits.length? hits.map(s=>h('li',{style:{cursor:'pointer'},
+      onclick:()=>{location.hash='#/'+s.doc; $('#q').value=''; box.style.display='none';
+        setTimeout(()=>$('#s'+s.i)?.scrollIntoView({behavior:'smooth'}),80);}},
+      h('div',h('div.b',s.t),h('div.small.muted',s.docT+' — '+s.b.slice(0,90)+'…'))))
+    : h('li',h('span.muted.small','No match for “'+q+'”'))));
+  submit('handbook.search',{q}).catch(()=>{});
+};
+addEventListener('keydown', e => {
+  if(e.key==='/' && document.activeElement!==$('#q')){ e.preventDefault(); $('#q').focus(); }
+  if(e.key==='Escape'){ $('#q').value=''; $('#results').style.display='none'; $('#q').blur(); }
+});
+route({'':()=>render('start'), ':id':a=>render(a.id), '*':()=>render('start')});
+</script>

@@ -1,0 +1,111 @@
+<!--hz {"title":"Meet","archetype":"realtime video (WebRTC)","creator":"live","desc":"WebRTC demonstration: real camera capture, a real RTCPeerConnection with live ICE/connection state, mute and camera toggles, device picker and live bitrate stats read from getStats().","nav":[["#/","Call"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Meet</h1>
+  <span class="tag" id="state">idle</span>
+  <span class="spacer"></span>
+  <button class="p" id="start">Start camera</button>
+  <button id="connect" disabled>Connect peer</button>
+  <button id="hang" disabled>Hang up</button>
+</div>
+<div class="grid wide" id="stage" style="margin-bottom:14px"></div>
+<div class="split r">
+  <div class="pane"><header>Connection</header><div class="body" id="conn"></div></div>
+  <div class="col">
+    <div class="pane"><header>Devices</header><div class="body col" id="dev"></div></div>
+    <div class="pane"><div class="body"><p class="hz-note" style="margin:0">This is real WebRTC. The browser asks for your camera, a genuine <code>RTCPeerConnection</code> is negotiated, and the remote tile plays the media that actually traversed that connection. Both peers live in this page, so no signalling server is needed and nothing leaves your machine.</p></div></div>
+  </div>
+</div>
+<script>
+const {h,fill,$,fmt,toast,submit} = hz;
+let local, pc1, pc2, stats, t0;
+const tile = (id,label,me) => h('div.pane',
+  h('header', label, h('span.spacer'), h('span.tag'+(me?'.acc':''), me?'local':'remote')),
+  h('video',{id, autoplay:true, playsinline:true, muted:me,
+    style:{width:'100%',display:'block',background:'#000',aspectRatio:'16/9',objectFit:'cover'}}));
+fill($('#stage'), tile('lv','You',true), tile('rv','Peer',false));
+const setState = s => $('#state').textContent = s;
+
+async function devices(){
+  try {
+    const list = await navigator.mediaDevices.enumerateDevices();
+    const cams = list.filter(d=>d.kind==='videoinput'), mics = list.filter(d=>d.kind==='audioinput');
+    fill($('#dev'),
+      h('div.field',{style:{margin:0}},h('label','Camera'),
+        h('select',{id:'cam'}, cams.length? cams.map((d,i)=>h('option',{value:d.deviceId},d.label||('Camera '+(i+1))))
+          : h('option','No camera detected'))),
+      h('div.field',{style:{margin:0}},h('label','Microphone'),
+        h('select',{id:'mic'}, mics.length? mics.map((d,i)=>h('option',{value:d.deviceId},d.label||('Microphone '+(i+1))))
+          : h('option','No microphone detected'))),
+      h('div.row',
+        h('button.sm',{id:'mute',disabled:!local,onclick:()=>{
+          const t = local?.getAudioTracks()[0]; if(!t) return; t.enabled=!t.enabled;
+          $('#mute').textContent = t.enabled?'Mute':'Unmute'; }},'Mute'),
+        h('button.sm',{id:'cam-off',disabled:!local,onclick:()=>{
+          const t = local?.getVideoTracks()[0]; if(!t) return; t.enabled=!t.enabled;
+          $('#cam-off').textContent = t.enabled?'Camera off':'Camera on'; }},'Camera off')));
+  } catch(e){ fill($('#dev'), h('p.small.muted','Device list unavailable: '+e.message)); }
+}
+$('#start').onclick = async () => {
+  try {
+    local = await navigator.mediaDevices.getUserMedia({video:{width:960},audio:true});
+    $('#lv').srcObject = local; setState('camera on');
+    $('#connect').disabled = false; $('#start').disabled = true;
+    await devices(); conn();
+    submit('meet.session',{event:'camera-started'}).catch(()=>{});
+  } catch(e){
+    setState('camera denied');
+    fill($('#conn'), h('div',h('p.small','The browser refused camera access: '+e.name+'.'),
+      h('p.small.muted','Everything else on this page still works — grant permission and press Start camera again to see a real peer connection negotiate.')));
+  }
+};
+$('#connect').onclick = async () => {
+  pc1 = new RTCPeerConnection(); pc2 = new RTCPeerConnection();
+  pc1.onicecandidate = e => e.candidate && pc2.addIceCandidate(e.candidate);
+  pc2.onicecandidate = e => e.candidate && pc1.addIceCandidate(e.candidate);
+  pc1.onconnectionstatechange = () => { setState(pc1.connectionState); conn(); };
+  pc1.oniceconnectionstatechange = conn;
+  pc2.ontrack = e => { $('#rv').srcObject = e.streams[0]; };
+  local.getTracks().forEach(t => pc1.addTrack(t, local));
+  const offer = await pc1.createOffer();
+  await pc1.setLocalDescription(offer); await pc2.setRemoteDescription(offer);
+  const answer = await pc2.createAnswer();
+  await pc2.setLocalDescription(answer); await pc1.setRemoteDescription(answer);
+  t0 = Date.now(); $('#connect').disabled = true; $('#hang').disabled = false;
+  toast('Peer connection negotiated'); conn();
+  stats = setInterval(readStats, 1000);
+};
+$('#hang').onclick = () => {
+  clearInterval(stats); pc1?.close(); pc2?.close(); pc1=pc2=null;
+  $('#rv').srcObject = null; $('#hang').disabled=true; $('#connect').disabled=false;
+  setState('hung up'); conn();
+};
+let last = {bytes:0, at:0};
+async function readStats(){
+  if(!pc1) return;
+  const s = await pc1.getStats(); let out=0, rtt=null, w=0, hh=0, fps=null;
+  s.forEach(r=>{
+    if(r.type==='outbound-rtp' && r.kind==='video'){ out=r.bytesSent||0; w=r.frameWidth||w; hh=r.frameHeight||hh; fps=r.framesPerSecond??fps; }
+    if(r.type==='candidate-pair' && r.state==='succeeded') rtt = r.currentRoundTripTime;
+  });
+  const now = Date.now(), kbps = last.at ? ((out-last.bytes)*8/1000/((now-last.at)/1000)) : 0;
+  last = {bytes:out, at:now};
+  conn({kbps, rtt, w, hh, fps, out});
+}
+function conn(x){
+  const rows = [
+    ['Signalling', pc1 ? pc1.signalingState : '—'],
+    ['ICE state', pc1 ? pc1.iceConnectionState : '—'],
+    ['Connection', pc1 ? pc1.connectionState : '—'],
+    ['Duration', t0 && pc1 ? Math.floor((Date.now()-t0)/1000)+' s' : '—'],
+    ['Resolution', x?.w ? x.w+'×'+x.hh : '—'],
+    ['Frame rate', x?.fps != null ? Math.round(x.fps)+' fps' : '—'],
+    ['Send bitrate', x?.kbps ? fmt.n(x.kbps,0)+' kbps' : '—'],
+    ['Bytes sent', x?.out ? fmt.kb(x.out) : '—'],
+    ['Round-trip', x?.rtt != null ? Math.round(x.rtt*1000)+' ms' : '—'],
+  ];
+  fill($('#conn'), h('table', h('tbody', rows.map(([k,v])=>h('tr',
+    h('td.small.muted',k), h('td.num.b',v))))),
+    h('p.hz-note',{style:{marginTop:'10px'}},'Every value above is read live from getStats() on the actual peer connection.'));
+}
+conn(); devices();
+</script>

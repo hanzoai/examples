@@ -1,0 +1,124 @@
+<!--hz {"title":"Forms","archetype":"form builder","creator":"apps","desc":"Form builder: drag fields into a form, configure validation and conditional logic, preview the live form, collect real responses into @hanzo/base and read them back in a response table.","nav":[["#/","Build"],["#/preview","Preview"],["#/responses","Responses"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Forms</h1><span class="tag" id="kpi"></span>
+  <span class="spacer"></span>
+  <input id="name" value="Beta access request" style="max-width:230px">
+  <button id="export">Export schema</button>
+</div>
+<div id="view"></div>
+<script>
+const {h,fill,$,store,uid,fmt,grid,modal,toast,submit,route} = hz;
+const KINDS = {
+  text:{t:'Short text', el:f=>h('input',{name:f.k,required:f.req,placeholder:f.ph||''})},
+  long:{t:'Paragraph', el:f=>h('textarea',{name:f.k,required:f.req,placeholder:f.ph||''})},
+  email:{t:'Email', el:f=>h('input',{name:f.k,type:'email',required:f.req,placeholder:'you@example.invalid'})},
+  number:{t:'Number', el:f=>h('input',{name:f.k,type:'number',required:f.req,min:f.min,max:f.max})},
+  select:{t:'Dropdown', el:f=>h('select',{name:f.k,required:f.req},(f.opts||[]).map(o=>h('option',o)))},
+  radio:{t:'Single choice', el:f=>h('div.col',{style:{gap:'5px'}},(f.opts||[]).map(o=>
+    h('label.inline',{style:{gap:'7px'}},h('input',{type:'radio',name:f.k,value:o,required:f.req}),h('span',o))))},
+  check:{t:'Checkboxes', el:f=>h('div.col',{style:{gap:'5px'}},(f.opts||[]).map(o=>
+    h('label.inline',{style:{gap:'7px'}},h('input',{type:'checkbox',name:f.k,value:o}),h('span',o))))},
+  date:{t:'Date', el:f=>h('input',{name:f.k,type:'date',required:f.req})},
+  rating:{t:'Rating 1–5', el:f=>h('div.row',{style:{gap:'4px'}},[1,2,3,4,5].map(n=>
+    h('label.inline',{style:{gap:'4px'}},h('input',{type:'radio',name:f.k,value:n,required:f.req&&n===1}),h('span',n))))},
+};
+const SEED = [
+  {id:uid(), k:'name', kind:'text', label:'Your name', req:true, ph:'First and last'},
+  {id:uid(), k:'email', kind:'email', label:'Email', req:true},
+  {id:uid(), k:'role', kind:'select', label:'What do you do?', req:true,
+   opts:['Engineer','Designer','Product','Operations','Something else']},
+  {id:uid(), k:'team_size', kind:'number', label:'How many people on your team?', min:1, max:5000},
+  {id:uid(), k:'usecase', kind:'long', label:'What would you build first?', req:true,
+   ph:'A sentence is plenty'},
+  {id:uid(), k:'urgency', kind:'rating', label:'How soon do you need this?', req:true},
+  {id:uid(), k:'contact_ok', kind:'check', label:'Consent', opts:['You may email me about the beta']},
+];
+const schema = store('forms.schema', SEED);
+const responses = store('forms.responses', []);
+const view = $('#view');
+function kpi(){ $('#kpi').textContent = schema.get().length+' fields · '+responses.get().length+' responses'; }
+
+function build(){
+  fill(view, h('div.split.r',
+    h('div.pane',h('header','Fields', h('span.spacer'), h('span.small.muted','drag to reorder')),
+      h('ul.list', schema.get().map((f,i)=>h('li',{draggable:true,style:{cursor:'grab'},
+        ondragstart:e=>e.dataTransfer.setData('i',i),
+        ondragover:e=>e.preventDefault(),
+        ondrop:e=>{ e.preventDefault(); const from=+e.dataTransfer.getData('i');
+          schema.set(v=>{ const n=[...v]; const [m]=n.splice(from,1); n.splice(i,0,m); return n; }); build(); }},
+        h('span.tag',i+1),
+        h('div',{style:{minWidth:0}}, h('div.b',f.label),
+          h('div.small.muted', KINDS[f.kind].t + (f.req?' · required':'') + ' · key '+f.k)),
+        h('span.spacer'),
+        h('button.g.sm',{onclick:()=>edit(f)},'✎'),
+        h('button.g.sm',{onclick:()=>{schema.set(v=>v.filter(x=>x.id!==f.id)); kpi(); build();}},'✕')))),
+      h('div.body', h('div.row',{style:{gap:'5px',flexWrap:'wrap'}},
+        Object.entries(KINDS).map(([k,K])=>h('button.sm',{onclick:()=>{
+          const f={id:uid(),k:'field_'+(schema.get().length+1),kind:k,label:K.t,req:false,
+            opts:['Option A','Option B']};
+          schema.set(v=>[...v,f]); kpi(); build(); edit(f); }},'+ '+K.t))))),
+    h('div.pane',h('header','Live preview'),h('div.body', formEl()))));
+}
+function edit(f){
+  const label=h('input',{value:f.label}), key=h('input',{value:f.k});
+  const req=h('input',{type:'checkbox',checked:f.req});
+  const opts=h('input',{value:(f.opts||[]).join(', '),placeholder:'Option A, Option B'});
+  const ph=h('input',{value:f.ph||''});
+  modal('Field settings', h('div',
+    h('div.field',h('label','Label'),label),
+    h('div.row',h('div.field',{style:{flex:1}},h('label','Key'),key),
+      h('div.field',{style:{flex:1}},h('label','Placeholder'),ph)),
+    ['select','radio','check'].includes(f.kind)? h('div.field',h('label','Options'),opts):null,
+    h('label.inline',{style:{gap:'8px'}},req,h('span','Required'))),
+    ()=>{ schema.set(v=>v.map(x=>x.id!==f.id?x:{...x, label:label.value, k:key.value.replace(/\W+/g,'_'),
+      req:req.checked, ph:ph.value, opts:opts.value.split(',').map(s=>s.trim()).filter(Boolean)}));
+      kpi(); build(); });
+}
+function formEl(){
+  const f = h('form', schema.get().map(fl=>h('div.field',
+      h('label', fl.label + (fl.req?' *':'')), KINDS[fl.kind].el(fl))),
+    h('button.p',{type:'submit',style:{width:'100%'}},'Submit'));
+  f.onsubmit = async e => {
+    e.preventDefault();
+    if(!f.reportValidity()) return;
+    const fd = new FormData(f), data = {};
+    for(const [k,v] of fd.entries()) data[k] = data[k]? [].concat(data[k], v) : v;
+    responses.set(v=>[{id:uid(), at:Date.now(), data},...v]);
+    f.reset(); kpi();
+    try{ await submit('forms.'+($('#name').value.trim().toLowerCase().replace(/\W+/g,'-')||'response'), data);
+      toast('Response saved to @hanzo/base'); }catch(err){ toast('Response saved locally'); }
+    if(location.hash.includes('responses')) resp();
+  };
+  return f;
+}
+function preview(){
+  fill(view, h('div',{style:{maxWidth:'620px',margin:'0 auto'}},
+    h('div.pane', h('header',$('#name').value||'Form'),
+      h('div.body', h('p.small.muted','This is the form exactly as a visitor sees it. Submitting really writes a record.'),
+        formEl()))));
+}
+function resp(){
+  const rs = responses.get();
+  const cols = schema.get().slice(0,5);
+  fill(view, h('div.pane',
+    h('header','Responses · '+rs.length, h('span.spacer'),
+      h('button.sm',{onclick:()=>{
+        if(!rs.length) return toast('Nothing to export');
+        const keys = schema.get().map(f=>f.k);
+        const csv = [keys.join(','), ...rs.map(r=>keys.map(k=>'"'+String(r.data[k]??'').replace(/"/g,'""')+'"').join(','))].join('\n');
+        h('a',{download:'responses.csv',href:URL.createObjectURL(new Blob([csv],{type:'text/csv'}))}).click(); }},'CSV'),
+      h('button.g.sm',{onclick:()=>{responses.set([]);kpi();resp();}},'Clear')),
+    rs.length? h('div.scroll-x',h('table',
+      h('thead',h('tr',h('th','When'),...cols.map(c=>h('th',c.label)))),
+      h('tbody', rs.map(r=>h('tr', h('td.small.muted',fmt.ago(r.at)),
+        ...cols.map(c=>h('td.small',String(r.data[c.k]??'—').slice(0,48))))))))
+      : h('div.empty','No responses yet — fill in the preview form.')));
+}
+$('#export').onclick = () => {
+  const spec = {name:$('#name').value, fields:schema.get().map(({id,...f})=>f)};
+  h('a',{download:'form-schema.json',href:URL.createObjectURL(new Blob([JSON.stringify(spec,null,2)],
+    {type:'application/json'}))}).click();
+  toast('Schema exported');
+};
+route({'':()=>{kpi();build();}, 'preview':()=>{kpi();preview();}, 'responses':()=>{kpi();resp();}, '*':()=>{kpi();build();}});
+</script>

@@ -1,0 +1,110 @@
+<!--hz {"title":"Agent","archetype":"AI agent / tool use","creator":"ai","desc":"Agent run inspector: a planner decomposes a goal into steps, calls real in-page tools (HTTP fetch, calculator, clock, Base write), and streams a transcript with per-step arguments, results, timing and token accounting.","nav":[["#/","Run"],["#/tools","Tools"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Agent</h1><span class="tag" id="runstate">idle</span>
+  <span class="spacer"></span>
+  <select id="goal" style="max-width:340px"></select>
+  <button class="p" id="go">Run</button><button class="g" id="stop" disabled>Stop</button>
+</div>
+<div class="split r">
+  <div class="pane"><header>Transcript <span class="spacer"></span><span class="small muted" id="meter"></span></header>
+    <div id="tape" class="body col" style="gap:10px;max-height:64vh;overflow:auto"></div></div>
+  <div class="col">
+    <div class="pane"><header>Plan</header><ul class="list" id="plan"></ul></div>
+    <div class="pane"><header>Tool calls</header><ul class="list" id="calls"></ul></div>
+  </div>
+</div>
+<p class="hz-note" style="margin-top:14px">The planner is a deterministic script, not a language model — but the tools it calls are real: <code>http.get</code> performs an actual same-origin request, <code>base.write</code> creates a real record in @hanzo/base, and every timing shown is measured.</p>
+<script>
+const {h,fill,$,store,fmt,uid,toast,submit,route,tabs} = hz;
+const TOOLS = {
+  'clock.now':{d:'Current time in ISO-8601 and epoch milliseconds', run: async()=>({iso:new Date().toISOString(),epoch:Date.now()})},
+  'math.eval':{d:'Evaluate an arithmetic expression', run: async a=>{
+    if(!/^[-+*/(). 0-9]+$/.test(a.expr)) throw new Error('unsafe expression');
+    return {expr:a.expr, value: Function('return ('+a.expr+')')()}; }},
+  'http.get':{d:'GET a same-origin path and report status, type and size', run: async a=>{
+    const t=performance.now(); const r=await fetch(a.path);
+    const body=await r.text();
+    return {path:a.path,status:r.status,type:r.headers.get('content-type'),bytes:body.length,ms:Math.round(performance.now()-t)}; }},
+  'site.manifest':{d:'Read this site’s first-party example manifest', run: async()=>{
+    const r=await fetch('/.well-known/hanzo-example.json'); return await r.json(); }},
+  'base.write':{d:'Create a record in the site’s @hanzo/base submissions collection', run: async a=>{
+    const r = await submit('agent.'+(a.form||'note'), a.data||{}); return {id:r.id, collection:r.collectionName}; }},
+  'text.summarize':{d:'Reduce text to its longest sentences (extractive, no model)', run: async a=>{
+    const s=(a.text||'').split(/(?<=\.)\s+/).sort((x,y)=>y.length-x.length).slice(0,2);
+    return {summary:s.join(' '), from:(a.text||'').length, to:s.join(' ').length}; }},
+};
+const GOALS = [
+ {g:'Check that this site is healthy and record the result', steps:[
+   ['Establish the current time','clock.now',{}],
+   ['Fetch the page itself','http.get',{path:'/'}],
+   ['Fetch the shared runtime kit','http.get',{path:'/hz.js'}],
+   ['Fetch the first-party manifest','site.manifest',{}],
+   ['Write the health result to Base','base.write',{form:'healthcheck'}]]},
+ {g:'Work out the cost of a deploy budget', steps:[
+   ['Compute monthly deploy count','math.eval',{expr:'12 * 30'}],
+   ['Compute bytes at 240 KB each','math.eval',{expr:'12 * 30 * 240 * 1024'}],
+   ['Record the estimate','base.write',{form:'estimate'}]]},
+ {g:'Summarise the manifest notice and store it', steps:[
+   ['Read the manifest','site.manifest',{}],
+   ['Summarise the notice field','text.summarize',{}],
+   ['Store the summary','base.write',{form:'summary'}]]},
+];
+const view = {tape:$('#tape'), plan:$('#plan'), calls:$('#calls')};
+let running=false, calls=[], tokens=0, t0=0;
+fill($('#goal'), GOALS.map((g,i)=>h('option',{value:i},g.g)));
+
+const bubble = (who,body,cls) => { const el = h('div.card.tight',{style:{borderLeft:'3px solid '+(cls||'var(--acc)')}},
+  h('div.small.muted',{style:{marginBottom:'4px'}},who), body); view.tape.append(el);
+  view.tape.scrollTop = view.tape.scrollHeight; return el; };
+const kv = o => h('pre',{style:{margin:'6px 0 0',fontSize:'11.5px'}}, JSON.stringify(o,null,2));
+
+async function run(){
+  const g = GOALS[+$('#goal').value];
+  running=true; calls=[]; tokens=0; t0=performance.now();
+  $('#go').disabled=true; $('#stop').disabled=false; $('#runstate').textContent='running';
+  fill(view.tape); fill(view.calls);
+  bubble('goal', h('div.b', g.g), 'var(--acc2)');
+  fill(view.plan, g.steps.map((s,i)=>h('li',h('span.tag',i+1),h('span.small',s[0]),
+    h('span.spacer'),h('span.tag',{id:'st'+i},'queued'))));
+  tokens += g.g.length/4|0; meter();
+  let carry = null;
+  for(let i=0;i<g.steps.length && running;i++){
+    const [label, tool, args0] = g.steps[i];
+    $('#st'+i).textContent='running'; $('#st'+i).className='tag warn';
+    let args = {...args0};
+    if(tool==='base.write') args.data = {step:label, carried:carry, ok:true};
+    if(tool==='text.summarize') args.text = carry?.notice || carry?.description || 'Nothing to summarise.';
+    bubble('step '+(i+1)+' · '+label, h('div',h('span.tag.acc',tool), kv(args)));
+    const t=performance.now();
+    try {
+      const res = await TOOLS[tool].run(args);
+      const ms = Math.round(performance.now()-t); carry = res;
+      calls.push({tool,ms,ok:true}); tokens += JSON.stringify(res).length/4|0;
+      bubble('result · '+ms+' ms', kv(res), 'var(--ok)');
+      $('#st'+i).textContent = ms+' ms'; $('#st'+i).className='tag ok';
+    } catch(e){
+      calls.push({tool,ms:0,ok:false});
+      bubble('error', h('span.down',String(e.message)), 'var(--bad)');
+      $('#st'+i).textContent='failed'; $('#st'+i).className='tag bad';
+    }
+    fill(view.calls, calls.map(c=>h('li',h('span.tag'+(c.ok?'.ok':'.bad'),c.ok?'ok':'err'),
+      h('span.mono.small',c.tool),h('span.spacer'),h('span.small.muted',c.ms+' ms'))));
+    meter(); await new Promise(r=>setTimeout(r,180));
+  }
+  bubble('done', h('div', h('span.b','Run finished. '),
+    h('span.small.muted', calls.filter(c=>c.ok).length+'/'+calls.length+' tool calls succeeded in '+
+      Math.round(performance.now()-t0)+' ms.')), 'var(--acc2)');
+  running=false; $('#go').disabled=false; $('#stop').disabled=true; $('#runstate').textContent='finished';
+}
+function meter(){ $('#meter').textContent = calls.length+' calls · ~'+fmt.n(tokens)+' tokens accounted · '+
+  Math.round(performance.now()-t0)+' ms'; }
+$('#go').onclick = run;
+$('#stop').onclick = () => { running=false; $('#runstate').textContent='stopped'; };
+function toolsView(){
+  fill(view.tape, h('div.pane', h('header','Tool registry'), h('table',
+    h('thead',h('tr',h('th','Tool'),h('th','What it does'))),
+    h('tbody', Object.entries(TOOLS).map(([k,v])=>h('tr',h('td.mono.small.b',k),h('td.small',v.d)))))));
+}
+route({'':()=>{}, 'tools':toolsView, '*':()=>{}});
+bubble('agent', h('span','Pick a goal and press Run. Each step names the tool it will call, shows the exact arguments, then shows the real result and how long it took.'));
+</script>

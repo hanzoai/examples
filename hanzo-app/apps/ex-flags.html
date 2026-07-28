@@ -1,0 +1,134 @@
+<!--hz {"title":"Flags","archetype":"devtool / feature flags","creator":"data","desc":"Feature-flag console: boolean and multivariate flags, percentage rollouts evaluated by a real hash bucketing function, targeting rules, an evaluation simulator over synthetic users and an audit trail.","nav":[["#/","Flags"],["#/simulate","Simulator"],["#/audit","Audit"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Flags</h1><span class="tag" id="kpi"></span>
+  <span class="spacer"></span>
+  <select id="env" style="max-width:150px"></select>
+  <button class="p" id="new">+ Flag</button>
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:16px">Bucketing is real: a user is assigned by hashing <code>flagKey:userId</code> into 0–99, so the same user always lands in the same bucket and a rollout percentage means exactly what it says.</p>
+<script>
+const {h,fill,$,store,rng,range,uid,fmt,bars,donut,modal,toast,submit,route} = hz;
+const ENVS = ['production','staging','development'];
+const SEED = [
+ {k:'new-release-view', d:'Content-addressed release history in the console', type:'boolean',
+  env:{production:{on:true,pct:35,rules:[['plan','is','team']]}, staging:{on:true,pct:100,rules:[]}, development:{on:true,pct:100,rules:[]}}},
+ {k:'activate-verifies-bytes', d:'Verify object bytes before flipping the serving pointer', type:'boolean',
+  env:{production:{on:false,pct:0,rules:[]}, staging:{on:true,pct:100,rules:[]}, development:{on:true,pct:100,rules:[]}}},
+ {k:'deploy-body-limit', d:'Maximum deploy body in mebibytes', type:'multivariate',
+  variants:['4','8','16'],
+  env:{production:{on:true,pct:100,rules:[],split:[80,15,5]}, staging:{on:true,pct:100,rules:[],split:[0,50,50]}, development:{on:true,pct:100,rules:[],split:[0,0,100]}}},
+ {k:'chat-widget', d:'Shared support chat runtime on published sites', type:'boolean',
+  env:{production:{on:true,pct:100,rules:[]}, staging:{on:true,pct:100,rules:[]}, development:{on:false,pct:0,rules:[]}}},
+ {k:'edge-stale-while-revalidate', d:'Serve stale objects while revalidating at the edge', type:'boolean',
+  env:{production:{on:true,pct:10,rules:[['region','is','ams3']]}, staging:{on:true,pct:100,rules:[]}, development:{on:false,pct:0,rules:[]}}},
+];
+const db = store('flags', SEED);
+const audit = store('flags.audit', []);
+const r = rng(4004);
+const USERS = range(400, i => ({id:'u'+(1000+i), plan: ['free','team','scale'][i%3],
+  region: ['sfo3','nyc1','ams3','sgp1'][i%4]}));
+let env = 'production';
+const view = $('#view');
+fill($('#env'), ENVS.map(e=>h('option',{selected:e===env},e)));
+$('#env').onchange = e => { env = e.target.value; go(); };
+
+function bucket(key, id){ let a=2166136261;
+  for(const c of key+':'+id){ a^=c.charCodeAt(0); a=Math.imul(a,16777619); }
+  return (a>>>0)%100; }
+function matches(rules, u){ return rules.every(([f,op,v])=> op==='is' ? u[f]===v : u[f]!==v); }
+function evaluate(flag, u){
+  const c = flag.env[env];
+  if(!c.on) return flag.type==='boolean' ? false : flag.variants[0];
+  if(!matches(c.rules, u)) return flag.type==='boolean' ? false : flag.variants[0];
+  if(bucket(flag.k, u.id) >= c.pct) return flag.type==='boolean' ? false : flag.variants[0];
+  if(flag.type==='boolean') return true;
+  const b = bucket(flag.k+':variant', u.id); let acc=0;
+  for(let i=0;i<flag.variants.length;i++){ acc += c.split[i]; if(b < acc) return flag.variants[i]; }
+  return flag.variants[flag.variants.length-1];
+}
+const log = (a,t) => audit.set(v=>[{at:Date.now(),env,action:a,target:t,by:'you@example.invalid'},...v].slice(0,120));
+function kpi(){ const d=db.get();
+  $('#kpi').textContent = d.length+' flags · '+d.filter(f=>f.env[env].on).length+' on in '+env; }
+function list(){
+  fill(view, h('div.col', db.get().map(f=>{
+    const c = f.env[env];
+    const exposed = USERS.filter(u=>{ const v=evaluate(f,u);
+      return f.type==='boolean'? v===true : v!==f.variants[0]; }).length;
+    return h('div.pane',
+      h('header', h('span.mono',f.k), h('span.tag',f.type),
+        h('span.spacer'),
+        h('span.small.muted', exposed+' of '+USERS.length+' users'),
+        h('button'+(c.on?'.p':'')+'.sm',{onclick:()=>{
+          db.set(v=>v.map(x=>x.k!==f.k?x:{...x,env:{...x.env,[env]:{...c,on:!c.on}}}));
+          log(c.on?'flag.off':'flag.on', f.k); kpi(); list(); }}, c.on?'On':'Off'),
+        h('button.sm',{onclick:()=>edit(f)},'Edit')),
+      h('div.body',
+        h('p.small',{style:{margin:'0 0 10px'}},f.d),
+        h('div.row',{style:{gap:'6px',marginBottom:'8px'}},
+          h('span.tag'+(c.pct===100?'.ok':c.pct?'.warn':''), c.pct+'% rollout'),
+          c.rules.map(([a,op,b])=>h('span.tag.acc',a+' '+op+' '+b)),
+          f.type==='multivariate'? f.variants.map((vn,i)=>h('span.tag',vn+' · '+c.split[i]+'%')):null),
+        h('div.bar',h('i',{style:{width:(exposed/USERS.length*100)+'%',
+          background: c.on?'var(--acc)':'var(--fg3)'}}))));
+  })));
+}
+function edit(f){
+  const c = f.env[env];
+  const pct = h('input',{type:'range',min:0,max:100,value:c.pct});
+  const lab = h('label','Rollout · '+c.pct+'%');
+  pct.oninput = () => lab.textContent = 'Rollout · '+pct.value+'%';
+  const field = h('select',['plan','region'].map(x=>h('option',{selected:c.rules[0]?.[0]===x},x)));
+  const val = h('input',{value:c.rules[0]?.[2]||'',placeholder:'leave blank for no rule'});
+  modal(f.k+' · '+env, h('div',
+    h('div.field',lab,pct),
+    h('div.small.muted',{style:{marginBottom:'6px'}},'Targeting rule'),
+    h('div.row',h('div.field',{style:{flex:1}},field),h('div.field',{style:{flex:1}},val)),
+    f.type==='multivariate'? h('p.small.muted','Variant split is edited in the flag definition; the simulator shows the resulting distribution.') : null),
+    () => { const rules = val.value.trim()? [[field.value,'is',val.value.trim()]] : [];
+      db.set(v=>v.map(x=>x.k!==f.k?x:{...x,env:{...x.env,[env]:{...c, pct:+pct.value, rules}}}));
+      log('flag.update', f.k+' pct='+pct.value); kpi(); list(); });
+}
+function simulate(){
+  const rows = db.get().map(f=>{
+    const counts = {};
+    USERS.forEach(u=>{ const v=String(evaluate(f,u)); counts[v]=(counts[v]||0)+1; });
+    return {f, counts};
+  });
+  const uid0 = h('input',{value:'u1042'});
+  const out = h('div.body');
+  const run = () => { const u = USERS.find(x=>x.id===uid0.value.trim()) || {id:uid0.value.trim(),plan:'free',region:'sfo3'};
+    fill(out, h('table',h('thead',h('tr',h('th','Flag'),h('th','Bucket'),h('th','Result'))),
+      h('tbody', db.get().map(f=>h('tr', h('td.mono.small',f.k),
+        h('td.num',bucket(f.k,u.id)), h('td',h('span.tag'+(String(evaluate(f,u))==='true'?'.ok':''),String(evaluate(f,u)))))))),
+      h('p.small.muted',{style:{marginTop:'8px'}},'User '+u.id+' · plan '+u.plan+' · region '+u.region)); };
+  uid0.oninput = run;
+  fill(view, h('div.split.r',
+    h('div.pane',h('header','Distribution over '+USERS.length+' synthetic users in '+env),
+      h('div.body.col', rows.map(({f,counts})=>h('div',
+        h('div.small.b',f.k),
+        bars(Object.entries(counts).map(([k,v])=>({k, v, f:v+' users'}))))))),
+    h('div.pane',h('header','Evaluate one user'),
+      h('div.body',h('div.field',h('label','User id'),uid0)), out)));
+  run();
+}
+function auditView(){
+  fill(view, h('div.pane',h('header','Change history'),
+    audit.get().length? h('table',h('thead',h('tr',h('th','When'),h('th','Env'),h('th','Action'),h('th','Target'))),
+      h('tbody', audit.get().map(a=>h('tr',h('td.small.muted',fmt.ago(a.at)),
+        h('td',h('span.tag',a.env)), h('td',h('span.tag.acc',a.action)), h('td.mono.small',a.target)))))
+      : h('div.empty','No changes recorded in this session yet — toggle a flag.')));
+}
+$('#new').onclick = () => {
+  const k=h('input',{placeholder:'flag-key'}), d=h('input',{placeholder:'What does it control?'});
+  modal('New flag', h('div',h('div.field',h('label','Key'),k),h('div.field',h('label','Description'),d)),
+    async ()=>{ if(!k.value.trim()) return;
+      const f = {k:k.value.trim(), d:d.value.trim(), type:'boolean',
+        env:Object.fromEntries(ENVS.map(e=>[e,{on:e!=='production',pct:e==='production'?0:100,rules:[]}]))};
+      db.set(v=>[f,...v]); log('flag.create', f.k); kpi(); list();
+      try{ await submit('flags.create',{key:f.k}); toast('Flag recorded in @hanzo/base'); }catch(e){ toast('Flag added locally'); } },'Create');
+};
+const go = () => { kpi(); const at=location.hash.replace(/^#\/?/,'');
+  at==='simulate'? simulate() : at==='audit'? auditView() : list(); };
+route({'':go,'simulate':go,'audit':go,'*':go});
+</script>

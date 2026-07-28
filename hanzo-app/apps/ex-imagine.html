@@ -1,0 +1,121 @@
+<!--hz {"title":"Imagine","archetype":"image generation UI","creator":"ai","desc":"Generation studio interface: prompt and negative prompt, model and sampler controls, seed locking, aspect ratios, a batch queue with progress, and a gallery — with images synthesised in-page from the prompt hash.","nav":[["#/","Studio"],["#/gallery","Gallery"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Imagine</h1><span class="tag" id="qn">queue empty</span>
+  <span class="spacer"></span><span class="small muted">Renders are procedural, produced in this page</span>
+</div>
+<div id="view"></div>
+<script>
+const {h,fill,$,store,rng,range,uid,fmt,toast,submit,route} = hz;
+const gallery = store('imagine.gallery', []);
+const view = $('#view');
+const MODELS = ['zen-image-xl','zen-image-lite','zen-image-turbo'];
+const SAMPLERS = ['euler-a','dpm++ 2m','heun','lms'];
+const RATIOS = {'1:1':[512,512],'3:2':[576,384],'2:3':[384,576],'16:9':[608,342]};
+const P = store('imagine.params', {prompt:'a lighthouse at dusk, long exposure, low horizon',
+  neg:'text, watermark', model:MODELS[0], sampler:SAMPLERS[0], steps:28, cfg:6.5, ratio:'3:2', seed:0, batch:2});
+let queue = [];
+
+const hash = s => { let a=2166136261; for(const c of s){ a^=c.charCodeAt(0); a=Math.imul(a,16777619); } return a>>>0; };
+
+/** Procedural render: a deterministic field seeded by the prompt. The image is
+ *  computed here, in the page — nothing is fetched and nothing is claimed to be
+ *  the output of a generative model. */
+function render(cv, prompt, seed, w, hh){
+  cv.width=w; cv.height=hh; const cx=cv.getContext('2d');
+  const r = rng(hash(prompt)+seed*7919);
+  const hue = r()*360, hue2 = (hue + 60 + r()*160)%360;
+  const g = cx.createLinearGradient(0,0,w*(0.3+r()),hh);
+  g.addColorStop(0,`hsl(${hue} ${40+r()*35}% ${16+r()*22}%)`);
+  g.addColorStop(1,`hsl(${hue2} ${40+r()*40}% ${10+r()*16}%)`);
+  cx.fillStyle=g; cx.fillRect(0,0,w,hh);
+  const horizon = hh*(0.45+r()*0.3);
+  const sky = cx.createLinearGradient(0,0,0,horizon);
+  sky.addColorStop(0,`hsla(${hue2} 70% 62%, .30)`); sky.addColorStop(1,'hsla(0 0% 0% 0)');
+  cx.fillStyle=sky; cx.fillRect(0,0,w,horizon);
+  cx.globalAlpha=.9;
+  cx.beginPath(); cx.arc(w*(0.15+r()*0.7), horizon*(0.3+r()*0.4), 12+r()*26, 0, 7);
+  cx.fillStyle=`hsl(${(hue2+30)%360} 90% ${68+r()*18}%)`; cx.fill();
+  cx.globalAlpha=1;
+  for(let l=0;l<4;l++){
+    const y = horizon + l*(hh-horizon)/4.4;
+    cx.beginPath(); cx.moveTo(0,y+20);
+    for(let x=0;x<=w;x+=8) cx.lineTo(x, y + Math.sin(x/(28+l*14)+r()*6)*(8+l*5) + Math.sin(x/9)*2);
+    cx.lineTo(w,hh); cx.lineTo(0,hh); cx.closePath();
+    cx.fillStyle=`hsla(${(hue+l*22)%360} ${34+l*7}% ${9+l*7}%, .93)`; cx.fill();
+  }
+  for(let i=0;i<180;i++){ cx.fillStyle=`hsla(0 0% 100% ${(r()*0.5).toFixed(2)})`;
+    cx.fillRect(r()*w, r()*horizon, 1.1, 1.1); }
+  const id = cx.getImageData(0,0,w,hh), d = id.data;
+  for(let i=0;i<d.length;i+=4){ const n=(Math.random()-0.5)*11; d[i]+=n; d[i+1]+=n; d[i+2]+=n; }
+  cx.putImageData(id,0,0);
+}
+function studio(){
+  const p = P.get();
+  const set = (k,v) => P.set(x=>({...x,[k]:v}));
+  const [w,hh] = RATIOS[p.ratio];
+  const stage = h('div.grid',{style:{gridTemplateColumns:'repeat(auto-fill,minmax(210px,1fr))'},id:'stage'});
+  fill(view, h('div.split',
+    h('div.pane',h('header','Parameters'),h('div.body.col',
+      h('div.field',{style:{margin:0}},h('label','Prompt'),
+        h('textarea',{value:p.prompt,oninput:e=>set('prompt',e.target.value)})),
+      h('div.field',{style:{margin:0}},h('label','Negative prompt'),
+        h('input',{value:p.neg,oninput:e=>set('neg',e.target.value)})),
+      h('div.row',
+        h('div.field',{style:{flex:1,margin:0}},h('label','Model'),
+          h('select',{onchange:e=>set('model',e.target.value)},MODELS.map(m=>h('option',{selected:m===p.model},m)))),
+        h('div.field',{style:{flex:1,margin:0}},h('label','Sampler'),
+          h('select',{onchange:e=>set('sampler',e.target.value)},SAMPLERS.map(m=>h('option',{selected:m===p.sampler},m))))),
+      h('div.field',{style:{margin:0}},h('label','Steps · '+p.steps),
+        h('input',{type:'range',min:4,max:60,value:p.steps,oninput:e=>{set('steps',+e.target.value);studio();}})),
+      h('div.field',{style:{margin:0}},h('label','Guidance · '+p.cfg),
+        h('input',{type:'range',min:1,max:14,step:0.5,value:p.cfg,oninput:e=>{set('cfg',+e.target.value);studio();}})),
+      h('div.row',
+        h('div.field',{style:{flex:1,margin:0}},h('label','Aspect'),
+          h('select',{onchange:e=>{set('ratio',e.target.value);studio();}},Object.keys(RATIOS).map(k=>h('option',{selected:k===p.ratio},k)))),
+        h('div.field',{style:{flex:1,margin:0}},h('label','Batch'),
+          h('select',{onchange:e=>set('batch',+e.target.value)},[1,2,4].map(n=>h('option',{selected:n===p.batch},n))))),
+      h('div.field',{style:{margin:0}},h('label','Seed (0 = random)'),
+        h('div.inline', h('input',{type:'number',value:p.seed,oninput:e=>set('seed',+e.target.value)}),
+          h('button.sm',{onclick:()=>{set('seed',Math.floor(Math.random()*1e6));studio();}},'🎲'))),
+      h('button.p',{style:{width:'100%'},onclick:()=>generate(stage)},'Generate '+p.batch+' image'+(p.batch>1?'s':'')),
+      h('p.hz-note',{style:{margin:0}},'Model names and samplers are labels on a UI, not calls to a model. Each image is drawn procedurally from a hash of the prompt and seed — same prompt and seed always give the same picture.'))),
+    h('div.pane',h('header','Output '+w+'×'+hh),h('div.body',stage,
+      h('p.small.muted',{style:{marginTop:'10px'}},'Generated images are saved to the gallery and their parameters recorded in @hanzo/base.')))));
+}
+async function generate(stage){
+  const p = P.get(), [w,hh] = RATIOS[p.ratio];
+  fill(stage);
+  for(let i=0;i<p.batch;i++){
+    const seed = p.seed || Math.floor(Math.random()*1e6);
+    const bar = h('div.bar',h('i',{style:{width:'0%'}}));
+    const cv = h('canvas',{style:{width:'100%',borderRadius:'8px',display:'block'}});
+    const box = h('div.col',{style:{gap:'6px'}}, cv, bar,
+      h('div.row',h('span.small.muted','seed '+seed),h('span.spacer'),
+        h('button.sm',{onclick:()=>{const a=h('a',{download:'imagine-'+seed+'.png',href:cv.toDataURL()});a.click();}},'Save')));
+    stage.append(box);
+    for(let s=1;s<=p.steps;s++){
+      bar.firstChild.style.width = (s/p.steps*100)+'%';
+      $('#qn').textContent = 'image '+(i+1)+'/'+p.batch+' · step '+s+'/'+p.steps;
+      if(s%4===0 || s===p.steps) render(cv, p.prompt, seed, w, hh);
+      await new Promise(r=>setTimeout(r, 12));
+    }
+    bar.remove();
+    gallery.set(v=>[{id:uid(),seed,prompt:p.prompt,model:p.model,sampler:p.sampler,steps:p.steps,
+      cfg:p.cfg,ratio:p.ratio,at:Date.now(),url:cv.toDataURL('image/webp',0.7)},...v].slice(0,24));
+    submit('imagine.generate',{prompt:p.prompt,model:p.model,seed,steps:p.steps,cfg:p.cfg}).catch(()=>{});
+  }
+  $('#qn').textContent = 'queue empty'; toast('Saved to gallery');
+}
+function galleryView(){
+  const g = gallery.get();
+  fill(view, h('div.pane',h('header','Gallery '+g.length+' image'+(g.length===1?'':'s'),
+    h('span.spacer'), h('button.g.sm',{onclick:()=>{gallery.set([]);galleryView();}},'Clear')),
+    h('div.body', g.length? h('div.grid.wide', g.map(x=>h('div.card.tight',
+        h('img',{src:x.url,style:{borderRadius:'6px',width:'100%'}}),
+        h('div.small.trunc',{style:{marginTop:'8px'}},x.prompt),
+        h('div.row',{style:{gap:'5px',marginTop:'6px'}},
+          h('span.tag',x.model),h('span.tag','seed '+x.seed),h('span.tag',x.steps+' steps')))))
+      : h('div.empty','Nothing generated yet — go to the Studio tab.'))));
+}
+route({'':studio,'gallery':galleryView,'*':studio});
+</script>

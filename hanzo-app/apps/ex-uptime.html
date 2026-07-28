@@ -1,0 +1,87 @@
+<!--hz {"title":"Uptime","archetype":"status page","creator":"data","desc":"Public status page: per-service 90-day uptime bars, live overall banner, active and historical incidents with updates, and a subscribe form on @hanzo/base.","nav":[["#/","Status"],["#/history","Incident history"]]} -->
+<div id="banner"></div>
+<div id="view"></div>
+<script>
+const {h,fill,$,store,rng,range,fmt,route,wire,submit,toast} = hz;
+const r = rng(6006);
+const SERVICES = ['API','Site hosting','Deploys','Base (data)','Edge network','Identity','Object storage'];
+const DAYS = 90;
+// One deterministic history per service: 0 = operational, 1 = degraded, 2 = outage.
+const HIST = SERVICES.map((s,si) => range(DAYS, d => {
+  const x = r();
+  if (si===3 && d===DAYS-12) return 2;
+  if (si===2 && (d===DAYS-40||d===DAYS-39)) return 1;
+  return x>0.988 ? 1 : x>0.9975 ? 2 : 0;
+}));
+const INCIDENTS = [
+ {t:'Elevated error rate on data writes', sev:'major', at: Date.now()-12*864e5, done:true, svc:'Base (data)', updates:[
+   ['Investigating','Writes to the data plane are returning errors for a subset of projects.'],
+   ['Identified','A migration held a write lock longer than its timeout. The migration has been rolled back.'],
+   ['Monitoring','Error rate has returned to baseline. Watching for one hour before closing.'],
+   ['Resolved','No recurrence in the monitoring window. The migration will be re-attempted with a shorter batch size.']]},
+ {t:'Slow deploys in one region', sev:'minor', at: Date.now()-40*864e5, done:true, svc:'Deploys', updates:[
+   ['Investigating','Deploy latency is roughly three times normal for artifacts over two megabytes.'],
+   ['Resolved','A saturated upload path was rebalanced. Latency is back to normal.']]},
+];
+const view = $('#view');
+const up = h => (h.filter(x=>x===0).length/h.length*100).toFixed(2);
+const worst = Math.max(...HIST.map(hh=>hh[hh.length-1]));
+
+function banner(){
+  const [txt,cls] = worst===0?['All systems operational','ok']:worst===1?['Degraded performance','warn']:['Partial outage','bad'];
+  fill($('#banner'), h('div.card',{style:{marginBottom:'16px',borderColor:
+    worst===0?'#3ecf8e55':worst===1?'#f6b73c55':'#f4685e55'}},
+    h('div.row', h('span',{style:{width:'12px',height:'12px',borderRadius:'50%',
+      background:worst===0?'var(--ok)':worst===1?'var(--warn)':'var(--bad)'}}),
+      h('h1',{style:{margin:0,fontSize:'22px'}},txt),
+      h('span.spacer'),
+      h('span.small.muted','Updated '+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',second:'2-digit'})))));
+}
+function barsFor(hh){
+  return h('div',{style:{display:'flex',gap:'2px',height:'30px',alignItems:'stretch'}},
+    hh.map((v,i)=>h('div',{title:fmt.date(Date.now()-(DAYS-1-i)*864e5)+' — '+
+      (v===0?'operational':v===1?'degraded':'outage'),
+      style:{flex:1,borderRadius:'2px',minWidth:'2px',
+        background:v===0?'#3ecf8e':v===1?'#f6b73c':'#f4685e', opacity:v===0?.72:1}})));
+}
+function status(){
+  const active = INCIDENTS.filter(i=>!i.done);
+  fill(view,
+    active.length ? h('div.pane',{style:{marginBottom:'14px'}},h('header','Active incidents'),
+      h('ul.list',active.map(i=>h('li',h('span.tag.bad',i.sev),h('span.b',i.t))))) : null,
+    h('div.pane', h('header','Current status'),
+      h('ul.list', SERVICES.map((s,i)=>h('li',{style:{display:'block'}},
+        h('div.row',{style:{marginBottom:'6px'}},
+          h('span.b',s), h('span.spacer'),
+          h('span.small.muted',up(HIST[i])+'% · 90 days'),
+          h('span.tag '+(HIST[i][DAYS-1]===0?'ok':HIST[i][DAYS-1]===1?'warn':'bad'),
+            HIST[i][DAYS-1]===0?'operational':HIST[i][DAYS-1]===1?'degraded':'outage')),
+        barsFor(HIST[i]),
+        h('div.row',{style:{marginTop:'4px'}},h('span.small.muted','90 days ago'),h('span.spacer'),h('span.small.muted','today')))))),
+    h('div.split',{style:{marginTop:'14px'}},
+      h('div.pane',h('header','Subscribe to updates'),h('div.body',(()=>{
+        const f = h('form', h('div.field',h('label','Email'),
+          h('input',{name:'email',type:'email',required:true,placeholder:'you@example.invalid'})),
+          h('button.p',{type:'submit',style:{width:'100%'}},'Subscribe'));
+        return wire(f,'uptime.subscribe'); })(),
+        h('p.hz-note','Stored in @hanzo/base. No notification is ever sent from this demonstration.'))),
+      h('div.pane',h('header','Recent incidents'),
+        h('ul.list', INCIDENTS.map(i=>h('li',{style:{cursor:'pointer'},onclick:()=>{location.hash='#/history';}},
+          h('div',h('div.b',i.t),h('div.small.muted',fmt.date(i.at)+' · '+i.svc)),
+          h('span.spacer'), h('span.tag '+(i.sev==='major'?'bad':'warn'),i.sev)))))),
+    h('p.hz-note',{style:{marginTop:'14px'}},'This is an official Hanzo example. The uptime history and incidents on this page are generated demonstration data and do not describe the availability of any real service.'));
+}
+function history(){
+  fill(view, h('div.col', INCIDENTS.map(i=>h('div.pane',
+    h('header', h('span.tag '+(i.sev==='major'?'bad':'warn'),i.sev), h('span',i.t),
+      h('span.spacer'), h('span.small.muted',fmt.date(i.at))),
+    h('ul.list', i.updates.map(([k,v],n)=>h('li',{style:{alignItems:'flex-start'}},
+      h('span.tag',{style:{flex:'none',minWidth:'94px'}},k),
+      h('div',h('div.small',v), h('div.small.muted',{style:{marginTop:'2px'}},
+        fmt.date(i.at + n*36e5)+' '+fmt.time(i.at + n*36e5))))))))),
+    h('div.pane',{style:{marginTop:'14px'}},h('div.body',
+      h('p.hz-note',{style:{margin:0}},'Incident timelines are illustrative. They demonstrate the update cadence a status page should keep — investigating, identified, monitoring, resolved — rather than reporting real events.'))));
+}
+route({'':status,'history':history,'*':status}); banner();
+setInterval(banner, 15000);
+</script>

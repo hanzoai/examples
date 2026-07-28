@@ -1,0 +1,119 @@
+<!--hz {"title":"Feedback","archetype":"feature voting board","creator":"web","desc":"Public roadmap and feature-voting board: submit an idea, vote once per idea, filter by status and board, comment threads, and a changelog of what shipped — all persisted to @hanzo/base.","nav":[["#/","Ideas"],["#/shipped","Shipped"],["#/new","Submit"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Feedback</h1><span class="tag" id="n"></span>
+  <span class="spacer"></span>
+  <span id="boards" class="row" style="gap:4px"></span>
+  <a class="btn p" href="#/new">Submit an idea</a>
+</div>
+<div class="split.r" id="wrap"><div id="view"></div></div>
+<script>
+const {h,fill,$,store,rng,range,pick,uid,fmt,avatar,toast,submit,route,wire,tabs} = hz;
+const r = rng(2211);
+const BOARDS = ['All','Platform','Console','Data','Docs'];
+const STATES = {open:'', planned:'acc', building:'warn', shipped:'ok', declined:'bad'};
+const IDEAS = [
+ ['Retention policy for old releases','Platform','planned',54,'Storage grows without bound. Let me keep the last N releases or the last N days and garbage-collect the rest.'],
+ ['Verify bytes before activation','Platform','building',48,'An activation that promotes a partially uploaded release looks like it worked, which is the worst failure mode.'],
+ ['Diff two releases in the console','Console','open',37,'Show me which files changed between the release I am running and the one I am about to activate.'],
+ ['Per-form submission quotas','Data','planned',31,'Open create is the right default, but I want a ceiling per form so one page cannot fill the space.'],
+ ['Export audit log as CSV','Console','open',24,'Compliance asks for this every quarter and I do it by hand.'],
+ ['Executable examples in the API reference','Docs','shipped',22,'Let me run the request from the docs page against my own project.'],
+ ['Custom domain apex support','Platform','open',19,'A wildcard covers one label. The apex needs its own certificate and the flow should say so.'],
+ ['Dark mode contrast pass','Console','shipped',17,'Several tags fail AA on the dark theme.'],
+ ['Webhook replay','Platform','open',15,'When my endpoint was down I want to replay the deliveries rather than reconstruct them.'],
+ ['Search across a project’s records','Data','open',12,'The records browser lists but does not search.'],
+ ['Per-environment feature flags','Platform','declined',9,'Closing this: flags belong in your app, not in the hosting layer.'],
+].map(([t,board,state,votes,body],i)=>({id:uid(), t, board, state, votes, body,
+  at: Date.now()-Math.round(r()*120)*864e5,
+  by: pick(r,['ops_diary','tinyrepo','sdf_notes','cold_start','nightbuild']),
+  comments: range(Math.round(r()*3), ()=>({by:pick(r,['ada','grace','ken']),
+    t: pick(r,['We hit this too.','What would the default be?','Strong agree — this is our top ask.',
+      'Careful, this interacts with cache purging.']), at: Date.now()-Math.round(r()*60)*864e5}))}));
+const db = store('feedback', IDEAS);
+const voted = store('feedback.voted', []);
+const view = $('#view');
+let board='All';
+
+function boards(){ fill($('#boards'), BOARDS.map(b=>h('button.sm'+(b===board?' p':''),
+  {onclick:()=>{board=b;list();}}, b))); }
+function vote(x){
+  const on = voted.get().includes(x.id);
+  voted.set(v=>on? v.filter(i=>i!==x.id) : [...v,x.id]);
+  db.set(v=>v.map(y=>y.id===x.id?{...y,votes:y.votes+(on?-1:1)}:y));
+  if(!on) submit('feedback.vote',{idea:x.t}).catch(()=>{});
+  location.hash.startsWith('#/i/')? open(x.id) : list();
+}
+function card(x){
+  const on = voted.get().includes(x.id);
+  return h('li',{style:{alignItems:'flex-start'}},
+    h('button',{style:{flexDirection:'column',gap:'0',width:'56px',flex:'none',padding:'6px 0',
+      borderColor:on?'var(--acc)':'', color:on?'var(--acc)':''}, onclick:()=>vote(x)},
+      h('span','▲'), h('span.b.num',x.votes)),
+    h('div',{style:{minWidth:0,cursor:'pointer'},onclick:()=>{location.hash='#/i/'+x.id;}},
+      h('div.b',x.t),
+      h('div.small.muted',{style:{margin:'3px 0 6px'}}, x.body.slice(0,110)+(x.body.length>110?'…':'')),
+      h('div.row',{style:{gap:'6px'}}, h('span.tag '+STATES[x.state],x.state),
+        h('span.tag',x.board), h('span.small.muted',x.comments.length+' comments · '+fmt.ago(x.at)))));
+}
+function list(shipped){
+  boards();
+  const d = db.get().filter(x=>(board==='All'||x.board===board) &&
+    (shipped ? x.state==='shipped' : x.state!=='shipped'))
+    .sort((a,b)=>b.votes-a.votes);
+  $('#n').textContent = d.length+' ideas';
+  fill(view, h('div.split.r',
+    h('div.pane', h('ul.list', d.length? d.map(card) : h('li',h('span.muted.small','Nothing on this board yet.')))),
+    h('div.col',
+      h('div.pane',h('header','Status key'),h('ul.list', Object.entries(STATES).map(([k,c])=>h('li',
+        h('span.tag '+c,k), h('span.small.muted',
+          {open:'Collecting votes',planned:'Accepted, not started',building:'In progress',
+           shipped:'Released',declined:'Not doing — reason on the idea'}[k]))))),
+      h('div.pane',h('header','Most wanted'),h('ul.list', db.get().filter(x=>x.state!=='shipped')
+        .sort((a,b)=>b.votes-a.votes).slice(0,5).map((x,i)=>h('li',h('span.tag',i+1),
+          h('span.small.trunc',x.t), h('span.spacer'), h('span.b.num',x.votes))))),
+      h('div.pane',h('div.body',h('p.hz-note',{style:{margin:0}},
+        'Vote counts start from seeded demonstration values and change as you vote. Contributors are placeholder handles, not real people.'))))));
+}
+function open(id){
+  const x = db.get().find(y=>y.id===id); if(!x) return list();
+  const on = voted.get().includes(x.id);
+  const f = h('form', h('div.field',h('label','Add a comment'),
+    h('textarea',{name:'body',required:true,style:{minHeight:'90px'}})),
+    h('button.p',{type:'submit'},'Post comment'));
+  wire(f,'feedback.comment',(d)=>{ db.set(v=>v.map(y=>y.id===x.id?
+    {...y, comments:[...y.comments,{by:'you',t:d.body,at:Date.now()}]}:y)); open(id); });
+  fill(view, h('div.pane',
+    h('header', h('button.g.sm',{onclick:()=>{location.hash='#/';}},'‹ All ideas'),
+      h('span.spacer'), h('span.tag '+STATES[x.state],x.state), h('span.tag',x.board)),
+    h('div.body',
+      h('div.row',{style:{gap:'14px',alignItems:'flex-start'}},
+        h('button',{style:{flexDirection:'column',gap:'0',width:'64px',flex:'none',padding:'8px 0',
+          borderColor:on?'var(--acc)':'', color:on?'var(--acc)':''}, onclick:()=>vote(x)},
+          h('span','▲'), h('span.b.num',{style:{fontSize:'18px'}},x.votes), h('span.small','votes')),
+        h('div', h('h2',{style:{margin:0}},x.t),
+          h('div.small.muted',{style:{margin:'4px 0 10px'}},'submitted by '+x.by+' · '+fmt.ago(x.at)),
+          h('p',{style:{margin:0}},x.body)))),
+    h('ul.list', x.comments.length? x.comments.map(c=>h('li',{style:{alignItems:'flex-start'}},
+        avatar(c.by,26), h('div',h('div.row',{style:{gap:'6px'}},h('span.b',c.by),
+          h('span.small.muted',fmt.ago(c.at))), h('div.small',{style:{marginTop:'3px'}},c.t))))
+      : h('li',h('span.muted.small','No comments yet.'))),
+    h('div.body', f)));
+  scrollTo({top:0});
+}
+function neu(){
+  boards();
+  const f = h('form',
+    h('div.field',h('label','Title'),h('input',{name:'title',required:true,placeholder:'What should we build?'})),
+    h('div.field',h('label','Board'),h('select',{name:'board'},BOARDS.slice(1).map(b=>h('option',b)))),
+    h('div.field',h('label','Describe the problem, not the solution'),
+      h('textarea',{name:'body',required:true,style:{minHeight:'140px'}})),
+    h('button.p',{type:'submit'},'Submit idea'));
+  wire(f,'feedback.idea',(d)=>{
+    db.set(v=>[{id:uid(),t:d.title,board:d.board,state:'open',votes:1,body:d.body,
+      at:Date.now(),by:'you',comments:[]},...v]);
+    voted.set(v=>[...v, db.get()[0].id]); location.hash='#/'; list(); });
+  fill(view, h('div.pane',h('header','Submit an idea'),h('div.body',f,
+    h('p.hz-note','Ideas you submit stay in this browser and are recorded in @hanzo/base. No product team reads them.'))));
+}
+route({'':()=>list(false), 'shipped':()=>list(true), 'new':neu, 'i/:id':a=>{boards();open(a.id);}, '*':()=>list(false)});
+</script>

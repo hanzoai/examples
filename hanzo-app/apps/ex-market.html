@@ -1,0 +1,99 @@
+<!--hz {"title":"Bazaar","archetype":"marketplace","creator":"web","desc":"Two-sided marketplace: seller listings with facets and map-free geo filter, offer flow, seller pages and a create-listing form backed by @hanzo/base.","nav":[["#/","Browse"],["#/sell","Sell"],["#/offers","My offers"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Bazaar</h1><span class="tag acc" id="n"></span>
+  <span class="spacer"></span><a class="btn p" href="#/sell">List an item</a>
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:18px">A demonstration marketplace. Sellers, ratings and listings are synthetic placeholders — no rating, review count or sales figure here describes a real person or business.</p>
+<script>
+const {h,fill,$,store,rng,range,pick,uid,fmt,avatar,modal,toast,submit,route,wire,tabs} = hz;
+const r = rng(8123);
+const CATS=['Tools','Audio','Bikes','Cameras','Garden'];
+const CITY=['Portland','Rotterdam','Kyoto','Austin','Leeds','Turin'];
+const TITLES=[['Bench vise, 5in','Tools'],['Cordless driver kit','Tools'],['Hand plane no. 4','Tools'],
+ ['Studio monitors, pair','Audio'],['Ribbon microphone','Audio'],['Portable recorder','Audio'],
+ ['Steel touring frame','Bikes'],['Track wheelset','Bikes'],['Cargo trailer','Bikes'],
+ ['Rangefinder body','Cameras'],['50mm f/2 lens','Cameras'],['Light meter','Cameras'],
+ ['Copper watering can','Garden'],['Propagation shelf','Garden'],['Push reel mower','Garden']];
+const SELLERS = range(6,i=>({h:'seller_'+(i+1), n:['Alder Works','Kite Supply','Northgate','Two Rivers','Foxglove','Mainline'][i],
+  since:2019+i%4, listings:0}));
+const seed = TITLES.map(([t,c],i)=>({
+  id:uid(), t, c, price: Math.round((30+r()*680)/5)*5, city: pick(r,CITY),
+  cond: pick(r,['New','Like new','Good','Fair']), seller: SELLERS[i%6].h,
+  hue:[204,270,150,32,350][i%5], at: Date.now()-Math.round(r()*20)*864e5, offers:[],
+}));
+seed.forEach(l=>SELLERS.find(s=>s.h===l.seller).listings++);
+const db = store('bazaar', seed);
+const mine = store('bazaar.offers', []);
+const view = $('#view');
+let cat='All', maxp=800, city='Anywhere';
+
+const art = l => h('div',{style:{aspectRatio:'5/4',borderRadius:'8px',display:'grid',placeItems:'center',
+  color:'#fff',fontSize:'12px',fontWeight:700,letterSpacing:'.06em',
+  background:`linear-gradient(135deg,hsl(${l.hue} 44% 32%),hsl(${(l.hue+50)%360} 40% 20%))`}}, l.c.toUpperCase());
+
+function browse(){
+  const list = db.get().filter(l=>(cat==='All'||l.c===cat)&&l.price<=maxp&&(city==='Anywhere'||l.city===city));
+  $('#n').textContent = list.length+' listings';
+  fill(view, h('div.split',
+    h('div.pane',h('header','Filters'),h('div.body.col',
+      h('div.field',{style:{margin:0}},h('label','Category'),
+        h('select',{onchange:e=>{cat=e.target.value;browse();}},['All',...CATS].map(c=>h('option',{selected:c===cat},c)))),
+      h('div.field',{style:{margin:0}},h('label','Location'),
+        h('select',{onchange:e=>{city=e.target.value;browse();}},['Anywhere',...CITY].map(c=>h('option',{selected:c===city},c)))),
+      h('div.field',{style:{margin:0}},h('label','Max price · '+fmt.money(maxp)),
+        h('input',{type:'range',min:20,max:800,step:10,value:maxp,oninput:e=>{maxp=+e.target.value;browse();}})),
+      h('button.g',{onclick:()=>{cat='All';maxp=800;city='Anywhere';browse();}},'Clear filters'))),
+    h('div.grid.wide', list.length? list.map(l=>h('div.card',{style:{cursor:'pointer'},onclick:()=>open(l)},
+        art(l),
+        h('div.row',{style:{marginTop:'10px'}},h('span.b.trunc',l.t),h('span.spacer'),h('span.b.num',fmt.money(l.price))),
+        h('div.row',{style:{gap:'6px',marginTop:'6px'}},
+          h('span.tag',l.cond), h('span.small.muted',l.city), h('span.spacer'),
+          h('span.small.muted',fmt.ago(l.at)))))
+      : h('div.empty','No listings match these filters.'))));
+}
+function open(l){
+  const s = SELLERS.find(x=>x.h===l.seller);
+  const amt = h('input',{type:'number',value:Math.round(l.price*0.85),min:1});
+  const msg = h('textarea',{placeholder:'Message to the seller (optional)'});
+  modal(l.t, h('div', art(l),
+    h('div.row',{style:{margin:'12px 0',gap:'8px'}},
+      h('span.b.num',{style:{fontSize:'20px'}},fmt.money(l.price)),
+      h('span.tag',l.cond),h('span.tag',l.c),h('span.small.muted',l.city)),
+    h('div.row',{style:{gap:'9px',marginBottom:'12px'}}, avatar(s.n,30),
+      h('div',h('div.b',s.n),h('div.small.muted','Seller since '+s.since+' · '+s.listings+' active listings'))),
+    h('div.field',h('label','Your offer'),amt), h('div.field',h('label','Message'),msg)),
+    async () => {
+      const o = {listing:l.t, ask:l.price, offer:+amt.value, msg:msg.value.trim(), at:Date.now(), state:'sent'};
+      mine.set(v=>[o,...v]);
+      try{ await submit('bazaar.offer', o); toast('Offer sent via @hanzo/base'); }catch(e){ toast('Offer saved locally'); }
+    }, 'Send offer');
+}
+function offers(){
+  const o = mine.get();
+  fill(view, h('div.pane',h('header','Offers you have sent'),
+    o.length? h('table',h('thead',h('tr',h('th','Listing'),h('th','Asking'),h('th','Your offer'),h('th','Sent'),h('th','State'))),
+      h('tbody',o.map(x=>h('tr',h('td.b',x.listing),h('td.num',fmt.money(x.ask)),
+        h('td.num.b',fmt.money(x.offer)),h('td.small.muted',fmt.ago(x.at)),
+        h('td',h('span.tag.warn','awaiting seller'))))))
+      : h('div.empty','You have not made an offer yet. Open any listing to make one.')));
+}
+function sell(){
+  const f = h('form',
+    h('div.row',h('div.field',{style:{flex:2}},h('label','Title'),h('input',{name:'title',required:true,placeholder:'What are you selling?'})),
+      h('div.field',{style:{flex:1}},h('label','Price (USD)'),h('input',{name:'price',type:'number',required:true,value:120}))),
+    h('div.row',h('div.field',{style:{flex:1}},h('label','Category'),h('select',{name:'category'},CATS.map(c=>h('option',c)))),
+      h('div.field',{style:{flex:1}},h('label','Condition'),h('select',{name:'condition'},['New','Like new','Good','Fair'].map(c=>h('option',c)))),
+      h('div.field',{style:{flex:1}},h('label','City'),h('select',{name:'city'},CITY.map(c=>h('option',c))))),
+    h('div.field',h('label','Description'),h('textarea',{name:'description',placeholder:'Condition, history, what is included…'})),
+    h('button.p',{type:'submit'},'Publish listing'));
+  wire(f,'bazaar.listing',(d)=>{
+    db.set(v=>[{id:uid(),t:d.title,c:d.category,price:+d.price||0,city:d.city,cond:d.condition,
+      seller:SELLERS[0].h,hue:[204,270,150,32,350][Math.floor(Math.random()*5)],at:Date.now(),offers:[]},...v]);
+    location.hash='#/'; browse();
+  });
+  fill(view, h('div.pane',h('header','Create a listing'),h('div.body',f,
+    h('p.hz-note','Listings you create live in this browser and are recorded in @hanzo/base. Nothing is offered for actual sale.'))));
+}
+route({'':browse,'sell':sell,'offers':offers,'*':browse});
+</script>

@@ -1,0 +1,156 @@
+<!--hz {"title":"Globe","archetype":"WebGL / 3D","creator":"gfx","desc":"Interactive 3D globe: raymarched sphere with procedural continents, plotted points of presence, great-circle arcs between regions and an inertial drag/zoom camera.","nav":[["#/","Globe"]]} -->
+<div class="split r">
+  <div class="pane"><header>Network <span class="spacer"></span><span class="small muted" id="fps">—</span></header>
+    <canvas id="gl" style="width:100%;display:block;background:#04050a;aspect-ratio:4/3;cursor:grab"></canvas></div>
+  <div class="col">
+    <div class="pane"><header>Points of presence</header><ul class="list" id="pops"></ul></div>
+    <div class="pane"><header>View</header><div class="body col" id="ui"></div></div>
+    <div class="pane"><div class="body"><p class="hz-note" style="margin:0">The sphere, its landmasses and the atmosphere are generated in a fragment shader; the arcs are drawn over it in 2D from great-circle interpolation. Region names are real place names, but the traffic figures are synthetic.</p></div></div>
+  </div>
+</div>
+<script>
+const {h,fill,$,store,rng,range,fmt} = hz;
+const cv = $('#gl'), gl = cv.getContext('webgl2',{antialias:false});
+const ov = h('canvas',{style:{position:'absolute',inset:0,width:'100%',height:'100%',pointerEvents:'none'}});
+cv.parentElement.style.position='relative'; cv.parentElement.append(ov);
+const ox = ov.getContext('2d');
+const P = store('globe',{spin:0.25, atmo:0.7, land:0.55, arcs:1});
+const r = rng(1492);
+const POPS = [
+ ['San Francisco',37.77,-122.42], ['New York',40.71,-74.0], ['São Paulo',-23.55,-46.63],
+ ['London',51.51,-0.13], ['Amsterdam',52.37,4.90], ['Frankfurt',50.11,8.68],
+ ['Lagos',6.52,3.38], ['Dubai',25.20,55.27], ['Mumbai',19.08,72.88],
+ ['Singapore',1.35,103.82], ['Tokyo',35.68,139.69], ['Sydney',-33.87,151.21],
+].map(([n,la,lo])=>({n,la,lo, rps: Math.round(200+r()*4200), ms: Math.round(8+r()*70)}));
+const ARCS = [[0,3],[0,10],[3,4],[4,5],[8,9],[9,10],[1,2],[5,7],[7,8],[10,11],[1,3]];
+
+const FS = `#version 300 es
+precision highp float;
+uniform vec2 R; uniform float T,YAW,PITCH,ZOOM,ATMO,LAND;
+out vec4 O;
+float hash(vec3 p){ p=fract(p*0.3183099+vec3(0.71,0.113,0.419)); p*=17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+float noise(vec3 x){ vec3 i=floor(x), f=fract(x); f=f*f*(3.-2.*f);
+  return mix(mix(mix(hash(i),hash(i+vec3(1,0,0)),f.x),mix(hash(i+vec3(0,1,0)),hash(i+vec3(1,1,0)),f.x),f.y),
+             mix(mix(hash(i+vec3(0,0,1)),hash(i+vec3(1,0,1)),f.x),mix(hash(i+vec3(0,1,1)),hash(i+vec3(1,1,1)),f.x),f.y),f.z); }
+float fbm(vec3 p){ float a=0.5,s=0.0; for(int i=0;i<6;i++){ s+=a*noise(p); p*=2.03; a*=0.5; } return s; }
+mat3 rotY(float a){ float c=cos(a),s=sin(a); return mat3(c,0,-s, 0,1,0, s,0,c); }
+mat3 rotX(float a){ float c=cos(a),s=sin(a); return mat3(1,0,0, 0,c,-s, 0,s,c); }
+void main(){
+  vec2 uv=(gl_FragCoord.xy*2.0-R)/R.y;
+  vec3 ro=vec3(0.0,0.0,-3.2/ZOOM), rd=normalize(vec3(uv,1.6));
+  float b=dot(ro,rd), c=dot(ro,ro)-1.0, disc=b*b-c;
+  vec3 col=vec3(0.012,0.016,0.032);
+  // starfield
+  vec2 g=floor(uv*90.0); float st=hash(vec3(g,1.0));
+  if(st>0.9965) col += vec3(0.8,0.85,1.0)*(st-0.9965)*230.0;
+  float rim = 0.0;
+  if(disc>0.0){
+    float t=-b-sqrt(disc);
+    vec3 p=ro+rd*t, n=p;
+    vec3 q = rotX(PITCH)*rotY(YAW)*n;
+    float land = fbm(q*2.1+vec3(0.0,0.0,0.0));
+    float sea = smoothstep(LAND-0.03, LAND+0.03, land);
+    vec3 ocean = mix(vec3(0.03,0.10,0.26), vec3(0.05,0.20,0.42), fbm(q*4.0)*0.6);
+    vec3 ground = mix(vec3(0.10,0.26,0.14), vec3(0.36,0.32,0.20), fbm(q*6.0));
+    float ice = smoothstep(0.72,0.88,abs(q.y));
+    vec3 surf = mix(ocean, ground, sea);
+    surf = mix(surf, vec3(0.92,0.95,0.98), ice*0.85);
+    vec3 l = normalize(vec3(0.7,0.55,-0.9));
+    float dif = max(dot(n,l),0.0);
+    float night = smoothstep(0.0,0.18,dif);
+    // city lights on the dark side, only over land
+    float lights = sea * (1.0-night) * step(0.62, fbm(q*22.0));
+    col = surf*(0.10+0.95*dif) + vec3(1.0,0.82,0.45)*lights*0.55;
+    float fres = pow(1.0-max(dot(n,-rd),0.0), 3.0);
+    col += vec3(0.30,0.52,1.0)*fres*ATMO*0.9;
+  } else {
+    float d = length(uv)*ZOOM;
+    rim = exp(-pow(max(d-1.0,0.0)*7.0,1.5));
+    col += vec3(0.18,0.36,0.95)*rim*ATMO*0.55;
+  }
+  col = pow(col/(col+0.9), vec3(0.4545));
+  O = vec4(col,1.0);
+}`;
+const VS = `#version 300 es
+void main(){ vec2 p=vec2((gl_VertexID<<1)&2, gl_VertexID&2); gl_Position=vec4(p*2.0-1.0,0.0,1.0); }`;
+function sh(t,s){const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);
+  if(!gl.getShaderParameter(o,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o));return o;}
+const prog=gl.createProgram();
+gl.attachShader(prog,sh(gl.VERTEX_SHADER,VS)); gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,FS));
+gl.linkProgram(prog); gl.useProgram(prog);
+const U=n=>gl.getUniformLocation(prog,n);
+
+let yaw=2.2, pitch=0.25, zoom=1, drag=null, vel=0, t0=performance.now(), fr=0, tl=t0, sel=-1;
+cv.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId);cv.style.cursor='grabbing';});
+addEventListener('pointerup',()=>{drag=null;cv.style.cursor='grab';});
+cv.addEventListener('pointermove',e=>{ if(!drag)return;
+  vel = -(e.clientX-drag[0])*0.006; yaw += vel;
+  pitch = Math.max(-1.2,Math.min(1.2,pitch+(e.clientY-drag[1])*0.005)); drag=[e.clientX,e.clientY]; });
+cv.addEventListener('wheel',e=>{e.preventDefault(); zoom=Math.max(0.7,Math.min(2.6,zoom*(e.deltaY<0?1.1:0.91)));},{passive:false});
+
+// Project a lat/lon to screen using the same rotation the shader applies.
+function project(la,lo){
+  const p = la*Math.PI/180, l = lo*Math.PI/180;
+  let v = [Math.cos(p)*Math.sin(l), Math.sin(p), Math.cos(p)*Math.cos(l)];
+  const cy=Math.cos(-yaw), sy=Math.sin(-yaw);
+  v = [cy*v[0]+sy*v[2], v[1], -sy*v[0]+cy*v[2]];
+  const cx=Math.cos(-pitch), sx=Math.sin(-pitch);
+  v = [v[0], cx*v[1]-sx*v[2], sx*v[1]+cx*v[2]];
+  const front = v[2] < 0.0;
+  const scale = ov.height/2*zoom*0.63;
+  return [ov.width/2 + v[0]*scale, ov.height/2 - v[1]*scale, front];
+}
+function overlay(){
+  ox.clearRect(0,0,ov.width,ov.height);
+  if(P.get().arcs) ARCS.forEach(([a,b])=>{
+    const A=POPS[a], B=POPS[b];
+    ox.beginPath(); let started=false;
+    for(let i=0;i<=40;i++){ const t=i/40;
+      const la=A.la+(B.la-A.la)*t, lo=A.lo+(B.lo-A.lo)*t;
+      const [x,y,f]=project(la,lo);
+      if(!f){ started=false; continue; }
+      const lift = 1 + Math.sin(t*Math.PI)*0.10;
+      const cxp = ov.width/2 + (x-ov.width/2)*lift, cyp = ov.height/2 + (y-ov.height/2)*lift;
+      started ? ox.lineTo(cxp,cyp) : (ox.moveTo(cxp,cyp), started=true);
+    }
+    ox.strokeStyle='rgba(91,140,255,.55)'; ox.lineWidth=1.4*(devicePixelRatio||1); ox.stroke();
+  });
+  POPS.forEach((p,i)=>{ const [x,y,f]=project(p.la,p.lo); if(!f) return;
+    const dpr=(devicePixelRatio||1);
+    ox.beginPath(); ox.arc(x,y,(i===sel?5:3.2)*dpr,0,7);
+    ox.fillStyle = i===sel? '#f6b73c' : '#3ecf8e'; ox.fill();
+    ox.beginPath(); ox.arc(x,y,7*dpr,0,7); ox.strokeStyle='rgba(62,207,142,.35)'; ox.lineWidth=dpr; ox.stroke();
+    if(i===sel){ ox.font=(12*dpr)+'px system-ui'; ox.fillStyle='#fff'; ox.fillText(p.n, x+9*dpr, y-7*dpr); }
+  });
+}
+fill($('#pops'), POPS.map((p,i)=>h('li',{style:{cursor:'pointer'},
+  onmouseenter:()=>{sel=i;}, onmouseleave:()=>{sel=-1;},
+  onclick:()=>{ yaw = -p.lo*Math.PI/180; pitch = p.la*Math.PI/180*0.9; }},
+  h('span',{style:{width:'8px',height:'8px',borderRadius:'50%',background:'var(--ok)',flex:'none'}}),
+  h('div',{style:{minWidth:0}}, h('div.small.b',p.n), h('div.small.muted',fmt.n(p.rps)+' req/s · '+p.ms+' ms')))));
+function ui(){ const p=P.get();
+  fill($('#ui'),
+    h('div.field',{style:{margin:0}},h('label','Auto-spin · '+p.spin.toFixed(2)),
+      h('input',{type:'range',min:0,max:1,step:0.01,value:p.spin,oninput:e=>{P.set(v=>({...v,spin:+e.target.value}));ui();}})),
+    h('div.field',{style:{margin:0}},h('label','Atmosphere · '+p.atmo.toFixed(2)),
+      h('input',{type:'range',min:0,max:1.6,step:0.01,value:p.atmo,oninput:e=>{P.set(v=>({...v,atmo:+e.target.value}));ui();}})),
+    h('div.field',{style:{margin:0}},h('label','Land threshold · '+p.land.toFixed(2)),
+      h('input',{type:'range',min:0.4,max:0.72,step:0.005,value:p.land,oninput:e=>{P.set(v=>({...v,land:+e.target.value}));ui();}})),
+    h('label.inline',{style:{gap:'8px'}}, h('input',{type:'checkbox',checked:!!p.arcs,
+      onchange:e=>{P.set(v=>({...v,arcs:e.target.checked?1:0}));ui();}}), h('span','Show routes'))); }
+function resize(){ const dpr=Math.min(devicePixelRatio||1,2);
+  const w=Math.round(cv.clientWidth*dpr), hh=Math.round(cv.clientHeight*dpr);
+  if(cv.width!==w||cv.height!==hh){cv.width=w;cv.height=hh;ov.width=w;ov.height=hh;gl.viewport(0,0,w,hh);} }
+function frame(now){
+  resize(); const p=P.get(), t=(now-t0)/1000;
+  if(!drag){ yaw += p.spin*0.0035 + vel; vel *= 0.94; }
+  gl.uniform2f(U('R'),cv.width,cv.height); gl.uniform1f(U('T'),t);
+  gl.uniform1f(U('YAW'),yaw); gl.uniform1f(U('PITCH'),pitch); gl.uniform1f(U('ZOOM'),zoom);
+  gl.uniform1f(U('ATMO'),p.atmo); gl.uniform1f(U('LAND'),p.land);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  overlay();
+  if(++fr>=30){ $('#fps').textContent=Math.round(fr*1000/(now-tl))+' fps'; fr=0; tl=now; }
+  requestAnimationFrame(frame);
+}
+ui(); if(gl) requestAnimationFrame(frame); else $('#fps').textContent='WebGL2 unavailable';
+</script>

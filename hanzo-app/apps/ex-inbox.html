@@ -1,0 +1,97 @@
+<!--hz {"title":"Inbox","archetype":"chat / messaging","creator":"live","desc":"Team messenger: channel and DM list, threaded message view, typing indicator, unread badges, emoji reactions and slash commands.","nav":[["#/","Messages"]]} -->
+<div class="split" style="grid-template-columns:minmax(0,1fr)">
+  <div class="pane" id="sidebar">
+    <header>Workspace <span class="spacer"></span><button class="g sm" id="newch">+</button></header>
+    <div style="padding:8px 10px"><input id="q" placeholder="Jump to…"></div>
+    <div id="chans"></div>
+  </div>
+  <div class="pane" style="display:flex;flex-direction:column;height:min(74vh,700px)">
+    <header id="head">—</header>
+    <div class="body chat-log" id="log" style="flex:1"></div>
+    <div id="typing" class="small muted" style="padding:0 14px;height:18px"></div>
+    <form id="f" style="display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)">
+      <input id="m" placeholder="Message… (try /shrug or /me)" autocomplete="off">
+      <button class="p" type="submit">Send</button>
+    </form>
+  </div>
+</div>
+<p class="hz-note" style="margin-top:16px">Conversations are synthetic. Replies come from a scripted responder in this page, not from a person or a language model; messages you send are also recorded in @hanzo/base.</p>
+<script>
+const {h,fill,$,store,rng,range,pick,uid,fmt,avatar,toast,submit} = hz;
+const r = rng(1717);
+const CH = [
+  {id:'general', n:'# general', kind:'ch'},
+  {id:'deploys', n:'# deploys', kind:'ch'},
+  {id:'design', n:'# design', kind:'ch'},
+  {id:'incident-42', n:'# incident-42', kind:'ch'},
+  {id:'ada', n:'Ada L', kind:'dm'},
+  {id:'grace', n:'Grace H', kind:'dm'},
+  {id:'ken', n:'Ken T', kind:'dm'},
+];
+const OPEN = {
+  general:[['Grace H','Morning. Release notes for this week are drafted.'],['Ken T','Nice. I will add the rollback section.']],
+  deploys:[['Bot','ex-shop deployed · release rel_9c1f2 · 4 files'],['Ada L','Confirmed live, 200 on the health path.']],
+  design:[['Barbara L','Contrast pass is done for the dark theme, light needs one more look.']],
+  'incident-42':[['Bot','Severity 2 opened: elevated 5xx on the edge.'],['Ken T','Rolling back to the previous release now.'],['Bot','Error rate back to baseline.']],
+  ada:[['Ada L','Can you review the release retention PR when you get a minute?']],
+  grace:[['Grace H','Docs for the sites surface are up.']],
+  ken:[['Ken T','Pairing at 2? I want to walk through the pool code.']],
+};
+const seedMsgs = {};
+Object.entries(OPEN).forEach(([k,v]) => seedMsgs[k] = v.map((m,i)=>({id:uid(),who:m[0],t:m[1],at:Date.now()-(v.length-i)*Math.round(4+r()*40)*6e4,rx:{}})));
+const db = store('inbox.msgs', seedMsgs);
+const unread = store('inbox.unread', {deploys:2,'incident-42':3,grace:1});
+let cur = 'general', q='';
+
+function chans(){
+  const u = unread.get();
+  const groups = [['Channels','ch'],['Direct messages','dm']];
+  fill($('#chans'), groups.map(([label,kind]) => h('div',
+    h('div.small.muted',{style:{padding:'8px 14px 4px',textTransform:'uppercase',letterSpacing:'.05em',fontSize:'11px'}},label),
+    h('ul.list', CH.filter(c=>c.kind===kind && (!q||c.n.toLowerCase().includes(q))).map(c =>
+      h('li',{style:{cursor:'pointer',background:c.id===cur?'var(--bg3)':''},
+        onclick:()=>{cur=c.id;unread.set(v=>({...v,[c.id]:0}));chans();open();}},
+        c.kind==='dm'? avatar(c.n,24) : h('span.muted',{style:{width:'24px',textAlign:'center'}},'#'),
+        h('span'+(u[c.id]?'.b':''), c.kind==='dm'?c.n:c.n.slice(2)),
+        h('span.spacer'),
+        u[c.id]? h('span.tag.acc',u[c.id]) : null))))));
+}
+function open(){
+  const c = CH.find(x=>x.id===cur);
+  fill($('#head'), h('span',c.n), h('span.spacer'),
+    h('span.small.muted', (db.get()[cur]||[]).length+' messages'),
+    h('button.g.sm',{onclick:()=>{db.set(v=>({...v,[cur]:[]}));open();}},'Clear'));
+  const log = $('#log');
+  fill(log, (db.get()[cur]||[]).map(m => {
+    const me = m.who==='You';
+    const rx = h('div.row',{style:{gap:'4px',marginTop:'5px'}},
+      Object.entries(m.rx||{}).map(([e,n])=>h('span.tag',e+' '+n)),
+      h('button.g.sm',{style:{padding:'0 5px',fontSize:'11px'},onclick:()=>react(m.id,'👍')},'+'));
+    return h('div.msg.'+(me?'me':'them'), h('div.who',m.who), h('div',m.t), rx);
+  }));
+  log.scrollTop = log.scrollHeight;
+}
+function react(id,e){
+  db.set(v=>({...v,[cur]:v[cur].map(m=>m.id===id?{...m,rx:{...m.rx,[e]:(m.rx?.[e]||0)+1}}:m)})); open();
+}
+const REPLY = ['On it.','Good catch — opening an issue.','That matches what I saw in the logs.','Can you paste the request id?','Agreed, let us ship it.'];
+$('#f').onsubmit = async e => {
+  e.preventDefault(); let t = $('#m').value.trim(); if(!t) return; $('#m').value='';
+  if(t==='/shrug') t='¯\\_(ツ)_/¯';
+  else if(t.startsWith('/me ')) t='* '+t.slice(4);
+  db.set(v=>({...v,[cur]:[...(v[cur]||[]),{id:uid(),who:'You',t,at:Date.now(),rx:{}}]})); open();
+  try{ await submit('inbox.message',{channel:cur,text:t}); }catch(err){}
+  const other = CH.find(x=>x.id===cur).kind==='dm' ? CH.find(x=>x.id===cur).n : pick(r,['Ada L','Grace H','Ken T']);
+  $('#typing').textContent = other+' is typing…';
+  setTimeout(()=>{ $('#typing').textContent='';
+    db.set(v=>({...v,[cur]:[...(v[cur]||[]),{id:uid(),who:other,t:pick(r,REPLY),at:Date.now(),rx:{}}]})); open();
+  }, 900+Math.random()*900);
+};
+$('#q').oninput = e => { q=e.target.value.toLowerCase(); chans(); };
+$('#newch').onclick = () => {
+  const n = prompt('Channel name'); if(!n) return;
+  const id = n.toLowerCase().replace(/[^a-z0-9-]/g,'-');
+  CH.splice(4,0,{id,n:'# '+id,kind:'ch'}); db.set(v=>({...v,[id]:[]})); cur=id; chans(); open(); toast('Channel created');
+};
+chans(); open();
+</script>

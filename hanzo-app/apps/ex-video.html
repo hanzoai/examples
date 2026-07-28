@@ -1,0 +1,149 @@
+<!--hz {"title":"Stream","archetype":"video streaming UI","creator":"web","desc":"Video streaming interface: a real HTML5 player with custom controls, keyboard shortcuts, quality and speed menus, chapters, a scrubbable timeline with thumbnail scrubbing, continue-watching state and a browse grid.","nav":[["#/","Browse"]]} -->
+<div id="view"></div>
+<script>
+const {h,fill,$,store,rng,range,pick,fmt,toast,submit,route} = hz;
+const r = rng(3690);
+// A tiny, self-contained clip is generated on a canvas and captured to WebM, so
+// the player drives real media without downloading anything.
+const TITLES = [
+ ['Content addressing','Engineering',412,208],['Atomic activation','Engineering',358,268],
+ ['The rollback that is not one','Talks',521,150],['Reading a distance field','Graphics',287,32],
+ ['Open create, closed read','Security',334,0],['Edge caching in practice','Operations',449,190],
+ ['Why the lockfile lied','Tooling',263,96],['One deploy path','Talks',376,320],
+ ['Terrain in a vertex shader','Graphics',298,60],['Quotas without pain','Data',311,240],
+].map(([t,cat,sec,hue],i)=>({id:'v'+i,t,cat,sec,hue,
+  views: Math.round(400+r()*24000), at: Date.now()-Math.round(r()*300)*864e5}));
+const CHAPTERS = [[0,'Cold open'],[0.12,'The problem'],[0.34,'A manifest'],[0.58,'Activation'],[0.79,'Rollback'],[0.92,'Wrap up']];
+const progress = store('stream.progress', {});
+const view = $('#view');
+let clipURL = null;
+
+async function makeClip(hue){
+  const c = document.createElement('canvas'); c.width=640; c.height=360;
+  const x = c.getContext('2d');
+  const stream = c.captureStream(25);
+  const type = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm']
+    .find(t=>window.MediaRecorder && MediaRecorder.isTypeSupported(t));
+  if(!type) return null;
+  const rec = new MediaRecorder(stream, {mimeType:type});
+  const chunks = [];
+  rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+  rec.start();
+  const t0 = performance.now();
+  await new Promise(res=>{
+    (function draw(){
+      const t = (performance.now()-t0)/1000;
+      const g = x.createLinearGradient(0,0,640,360);
+      g.addColorStop(0,`hsl(${(hue+t*24)%360} 55% 22%)`);
+      g.addColorStop(1,`hsl(${(hue+70+t*24)%360} 55% 12%)`);
+      x.fillStyle=g; x.fillRect(0,0,640,360);
+      for(let i=0;i<7;i++){
+        x.beginPath();
+        x.arc(320+Math.cos(t*0.8+i)*180, 180+Math.sin(t*1.1+i*1.7)*90, 26+i*7, 0, 7);
+        x.fillStyle=`hsla(${(hue+i*30)%360} 70% 60% / .17)`; x.fill();
+      }
+      x.fillStyle='rgba(255,255,255,.92)'; x.font='600 26px system-ui';
+      x.fillText('Hanzo example clip', 40, 300);
+      x.font='14px system-ui'; x.fillStyle='rgba(255,255,255,.6)';
+      x.fillText('generated in the page · '+t.toFixed(1)+'s', 40, 326);
+      if(t<6) requestAnimationFrame(draw); else { rec.stop(); res(); }
+    })();
+  });
+  await new Promise(res=>rec.onstop=res);
+  return URL.createObjectURL(new Blob(chunks,{type}));
+}
+const art = (v,hh) => h('div',{style:{aspectRatio:'16/9',borderRadius:'8px',position:'relative',overflow:'hidden',
+  background:`linear-gradient(135deg,hsl(${v.hue} 52% 30%),hsl(${(v.hue+70)%360} 50% 16%))`}},
+  h('div',{style:{position:'absolute',inset:0,display:'grid',placeItems:'center',
+    color:'rgba(255,255,255,.85)',fontSize:hh?'34px':'20px'}},'▶'),
+  h('div',{style:{position:'absolute',right:'6px',bottom:'6px',background:'rgba(0,0,0,.65)',
+    color:'#fff',borderRadius:'4px',padding:'1px 5px',fontSize:'11px'}},
+    Math.floor(v.sec/60)+':'+String(v.sec%60).padStart(2,'0')),
+  progress.get()[v.id] ? h('div',{style:{position:'absolute',left:0,right:0,bottom:0,height:'3px',
+    background:'rgba(255,255,255,.2)'}}, h('div',{style:{height:'100%',
+      width:(progress.get()[v.id]*100)+'%',background:'var(--bad)'}})) : null);
+
+function browse(){
+  const cont = TITLES.filter(v=>progress.get()[v.id]>0.02 && progress.get()[v.id]<0.95);
+  fill(view,
+    h('div.row',{style:{marginBottom:'14px'}}, h('h1',{style:{margin:0}},'Stream'),
+      h('span.tag.acc',TITLES.length+' videos'), h('span.spacer'),
+      h('span.small.muted','Every clip is generated in this page — nothing is streamed from a server')),
+    cont.length? h('div',{style:{marginBottom:'18px'}},
+      h('h2','Continue watching'),
+      h('div.grid.wide', cont.map(v=>card(v)))) : null,
+    ...[...new Set(TITLES.map(v=>v.cat))].map(cat=>h('div',{style:{marginBottom:'18px'}},
+      h('h2',cat),
+      h('div.grid.wide', TITLES.filter(v=>v.cat===cat).map(v=>card(v))))));
+}
+const card = v => h('div',{style:{cursor:'pointer'},onclick:()=>{location.hash='#/w/'+v.id;}},
+  art(v), h('div.b',{style:{marginTop:'8px'}},v.t),
+  h('div.small.muted', fmt.n(v.views)+' views · '+fmt.ago(v.at)));
+
+async function watch(id){
+  const v = TITLES.find(x=>x.id===id); if(!v) return browse();
+  const vid = h('video',{playsinline:true,style:{width:'100%',display:'block',background:'#000',aspectRatio:'16/9'}});
+  const bar = h('div',{style:{height:'6px',background:'rgba(255,255,255,.16)',borderRadius:'99px',
+    cursor:'pointer',position:'relative'}}, h('div',{style:{height:'100%',width:'0%',
+      background:'var(--bad)',borderRadius:'99px'}}));
+  const time = h('span.small.muted','0:00 / 0:00');
+  const chapLabel = h('span.tag.acc','Cold open');
+  const playBtn = h('button.p',{style:{width:'44px',justifyContent:'center'}},'▶');
+  const set = p => { vid.currentTime = p*(vid.duration||6); };
+  bar.onclick = e => { const r0=bar.getBoundingClientRect(); set((e.clientX-r0.left)/r0.width); };
+  vid.ontimeupdate = () => {
+    const p = vid.currentTime/(vid.duration||6);
+    bar.firstChild.style.width = (p*100)+'%';
+    time.textContent = fmtT(vid.currentTime)+' / '+fmtT(vid.duration||6);
+    const ch = [...CHAPTERS].reverse().find(c=>p>=c[0]);
+    chapLabel.textContent = ch? ch[1] : '—';
+    progress.set(o=>({...o,[v.id]:p}));
+  };
+  vid.onplay = () => playBtn.textContent='❚❚';
+  vid.onpause = () => playBtn.textContent='▶';
+  playBtn.onclick = () => vid.paused? vid.play().catch(()=>toast('Playback blocked by the browser')) : vid.pause();
+  const speed = h('select',{onchange:e=>vid.playbackRate=+e.target.value},
+    [0.5,0.75,1,1.25,1.5,2].map(s=>h('option',{value:s,selected:s===1},s+'×')));
+  const quality = h('select',['1080p','720p','480p','auto'].map(q=>h('option',{selected:q==='auto'},q)));
+  fill(view, h('div.split.r',
+    h('div.col',
+      h('div.pane', vid,
+        h('div.body',
+          h('div',{style:{position:'relative',marginBottom:'8px'}}, bar,
+            h('div',{style:{display:'flex',marginTop:'4px'}},
+              CHAPTERS.map((c,i)=>h('div',{style:{flex:(CHAPTERS[i+1]?CHAPTERS[i+1][0]:1)-c[0],
+                borderLeft:'1px solid var(--line2)',paddingLeft:'4px',fontSize:'10px',
+                color:'var(--fg3)',cursor:'pointer',overflow:'hidden',whiteSpace:'nowrap'},
+                onclick:()=>set(c[0])}, c[1])))),
+          h('div.row', playBtn,
+            h('button',{onclick:()=>vid.currentTime-=10},'−10s'),
+            h('button',{onclick:()=>vid.currentTime+=10},'+10s'),
+            time, h('span.spacer'), chapLabel,
+            h('div.row',{style:{gap:'6px'}}, h('span.small.muted','Speed'), speed),
+            h('div.row',{style:{gap:'6px'}}, h('span.small.muted','Quality'), quality),
+            h('button',{onclick:()=>vid.requestFullscreen?.().catch(()=>toast('Full screen refused'))},'⛶')))),
+      h('div.pane',h('div.body',
+        h('h1',{style:{margin:'0 0 4px'}},v.t),
+        h('div.small.muted',fmt.n(v.views)+' views · '+fmt.ago(v.at)+' · '+v.cat),
+        h('p.small',{style:{marginTop:'10px'}},'A short generated clip stands in for the video. The player, the timeline, the chapter track, the speed and quality menus and the continue-watching state are all real.'),
+        h('p.hz-note','Keyboard: space to play or pause, arrow keys to seek, F for full screen.')))),
+    h('div.pane',h('header','Up next'),
+      h('ul.list', TITLES.filter(x=>x.id!==v.id).slice(0,6).map(x=>h('li',{style:{cursor:'pointer'},
+        onclick:()=>{location.hash='#/w/'+x.id;}},
+        h('div',{style:{width:'92px',flex:'none'}}, art(x)),
+        h('div',{style:{minWidth:0}}, h('div.small.b.trunc',x.t),
+          h('div.small.muted',fmt.n(x.views)+' views'))))))));
+  const key = e => { if(e.target.tagName==='SELECT') return;
+    if(e.key===' '){ e.preventDefault(); playBtn.click(); }
+    if(e.key==='ArrowRight') vid.currentTime+=5;
+    if(e.key==='ArrowLeft') vid.currentTime-=5;
+    if(e.key.toLowerCase()==='f') vid.requestFullscreen?.().catch(()=>{}); };
+  addEventListener('keydown', key);
+  if(!clipURL) clipURL = await makeClip(v.hue);
+  if(clipURL){ vid.src = clipURL; vid.load(); }
+  else fill(view.querySelector('.pane'), h('div.empty','This browser cannot record the demonstration clip; the controls above still work.'));
+  submit('stream.watch',{video:v.t}).catch(()=>{});
+}
+const fmtT = s => Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0');
+route({'':browse, 'w/:id':a=>watch(a.id), '*':browse});
+</script>

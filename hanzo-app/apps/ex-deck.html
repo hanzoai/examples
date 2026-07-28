@@ -1,0 +1,139 @@
+<!--hz {"title":"Deck","archetype":"presentation / slides","creator":"web","desc":"Presentation deck: markdown-authored slides, keyboard and touch navigation, speaker notes, a thumbnail overview grid, progress bar, presenter timer and full-screen presentation mode.","nav":[["#/","Present"],["#/edit","Edit"]]} -->
+<div class="row" style="margin-bottom:10px">
+  <h1 style="margin:0">Deck</h1><span class="tag" id="pos"></span>
+  <span class="tag" id="clock">00:00</span>
+  <span class="spacer"></span>
+  <button id="grid">Overview</button><button id="full">Full screen</button>
+  <button id="prev">‹</button><button id="next">›</button>
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:12px">Arrow keys, space, or swipe to move. Press <b>O</b> for the overview, <b>F</b> for full screen, <b>S</b> for speaker notes.</p>
+<script>
+const {h,fill,$,store,esc,toast,submit,route} = hz;
+const SRC = store('deck.src', `# Deploys should be boring
+## A short talk about manifests
+:: Introduce yourself, then say the whole talk is one idea.
+
+---
+# The idea
+A deploy is **a list of paths and their contents**.
+Everything else is machinery.
+:: Pause here. Let it land.
+
+---
+# Two kinds of thing
+- A build **process** can only be re-run
+- A manifest is a **value** — hash it, compare it, replay it
+:: The distinction does all the work in the rest of the talk.
+
+---
+# Content addressing
+The id of a release is the digest of its manifest.
+Publish the same bytes twice and you get one release, not two.
+:: Someone always asks about timestamps. The answer is: leave them out.
+
+---
+# Activation is a pointer
+Serving is a pointer. Activation moves it, atomically.
+A reader sees one whole release or the other.
+:: This is the property that makes partial deploys impossible.
+
+---
+# Therefore: rollback
+> Activate an earlier id.
+No rebuild. No redeploy. Recovery stops depending on build time.
+:: The punchline. Slow down.
+
+---
+# The test
+If your rollback needs a rebuild, it is a **forward deploy of older source**.
+It can fail for new reasons, at the worst moment.
+:: End on the test, not on a summary.
+`);
+const view = $('#view');
+let i = 0, t0 = Date.now(), notesOn = false;
+
+const slides = () => SRC.get().split(/^---$/m).map(s=>{
+  const lines = s.trim().split('\n');
+  const notes = lines.filter(l=>l.startsWith('::')).map(l=>l.slice(2).trim()).join(' ');
+  return {body: lines.filter(l=>!l.startsWith('::')).join('\n'), notes};
+});
+function md(s){
+  return esc(s)
+    .replace(/^# (.+)$/gm,'<h1 style="font-size:clamp(28px,5vw,50px);letter-spacing:-.03em;margin:0 0 .3em">$1</h1>')
+    .replace(/^## (.+)$/gm,'<h2 style="font-size:clamp(17px,2.6vw,26px);color:var(--fg2);font-weight:500;margin:0 0 .8em">$1</h2>')
+    .replace(/^&gt; (.+)$/gm,'<blockquote style="border-left:3px solid var(--acc);padding-left:14px;margin:.6em 0;font-size:clamp(18px,3vw,30px)">$1</blockquote>')
+    .replace(/^- (.+)$/gm,'<li style="font-size:clamp(16px,2.4vw,24px);margin:.35em 0">$1</li>')
+    .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')
+    .split('\n').map(l=>l.startsWith('<')?l:(l.trim()?'<p style="font-size:clamp(16px,2.4vw,24px);color:var(--fg2)">'+l+'</p>':''))
+    .join('').replace(/(<li[\s\S]*?<\/li>)/g,'<ul style="margin:0 0 .6em;padding-left:1.1em">$1</ul>');
+}
+function show(){
+  const S = slides(); i = Math.max(0, Math.min(S.length-1, i));
+  const s = S[i];
+  $('#pos').textContent = (i+1)+' / '+S.length;
+  fill(view, h('div',
+    h('div.pane',
+    h('div',{id:'stage',style:{padding:'clamp(24px,5vw,64px)',minHeight:'56vh',
+      display:'flex',flexDirection:'column',justifyContent:'center'}},
+      h('div',{html: md(s.body)})),
+    h('div',{style:{height:'4px',background:'var(--bg3)'}},
+      h('div',{style:{height:'100%',width:((i+1)/S.length*100)+'%',background:'var(--acc)'}})),
+    notesOn ? h('div.body',{style:{borderTop:'1px solid var(--line)'}},
+      h('div.small.muted','Speaker notes'), h('div.small', s.notes || '(none)')) : null),
+    // A filmstrip is how a presenter actually navigates mid-talk: the overview
+    // grid is a mode you have to enter, this is always there.
+    h('div.pane',{style:{marginTop:'12px'}},
+      h('header','Slides', h('span.spacer'),
+        h('span.small.muted', notesOn? 'notes on (S)' : 'press S for notes')),
+      h('div.scroll-x',{style:{padding:'10px'}},
+        h('div',{style:{display:'flex',gap:'8px',minWidth:'min-content'}},
+          S.map((sl,n)=>h('button',{style:{width:'132px',height:'80px',flex:'none',padding:'6px',
+              alignItems:'flex-start',overflow:'hidden',textAlign:'left',
+              borderColor: n===i?'var(--acc)':'var(--line)'},
+              onclick:()=>{ i=n; show(); }},
+            h('div',{style:{fontSize:'7px',lineHeight:1.25,pointerEvents:'none'},
+              html: md(sl.body)}))))))));
+}
+function overview(){
+  const S = slides();
+  fill(view, h('div.grid.wide', S.map((s,n)=>h('div.card',{style:{cursor:'pointer',
+      borderColor: n===i? 'var(--acc)':''}, onclick:()=>{ i=n; location.hash='#/'; show(); }},
+    h('div',{style:{fontSize:'11px',transform:'scale(1)',transformOrigin:'top left',
+      maxHeight:'150px',overflow:'hidden'}, html: md(s.body)}),
+    h('div.small.muted',{style:{marginTop:'8px'}}, 'Slide '+(n+1))))));
+}
+function editor(){
+  const ta = h('textarea',{value:SRC.get(),
+    style:{minHeight:'480px',fontFamily:'var(--mono)',fontSize:'13px'},
+    oninput:e=>{ SRC.set(e.target.value); }});
+  fill(view, h('div.split',
+    h('div.pane',h('header','Source — `---` splits slides, `::` is a speaker note'),h('div.body',ta,
+      h('div.row',{style:{marginTop:'10px'}},
+        h('button.p',{onclick:async()=>{ try{ await submit('deck.save',{slides:slides().length});
+          toast('Deck saved to @hanzo/base'); }catch(e){ toast('Saved locally'); } }},'Save deck'),
+        h('button.g',{onclick:()=>{SRC.reset();editor();toast('Reset');}},'Reset')))),
+    h('div.pane',h('header','Preview'),h('div.body',
+      h('div',{style:{fontSize:'12px'},html: md(slides()[0].body)})))));
+}
+const move = d => { i += d; location.hash='#/'; show(); };
+$('#next').onclick = ()=>move(1); $('#prev').onclick = ()=>move(-1);
+$('#grid').onclick = ()=>{ location.hash = location.hash.includes('over') ? '#/' : '#/over'; };
+$('#full').onclick = ()=>{ document.fullscreenElement ? document.exitFullscreen()
+  : document.documentElement.requestFullscreen?.().catch(()=>toast('Full screen refused')); };
+addEventListener('keydown', e => {
+  if(e.target.tagName==='TEXTAREA') return;
+  if(['ArrowRight',' ','PageDown'].includes(e.key)){ e.preventDefault(); move(1); }
+  if(['ArrowLeft','PageUp'].includes(e.key)){ e.preventDefault(); move(-1); }
+  if(e.key.toLowerCase()==='o') $('#grid').click();
+  if(e.key.toLowerCase()==='f') $('#full').click();
+  if(e.key.toLowerCase()==='s'){ notesOn=!notesOn; show(); }
+});
+let tx=null;
+addEventListener('touchstart', e=>tx=e.touches[0].clientX, {passive:true});
+addEventListener('touchend', e=>{ if(tx==null) return;
+  const dx=e.changedTouches[0].clientX-tx; if(Math.abs(dx)>60) move(dx<0?1:-1); tx=null; }, {passive:true});
+setInterval(()=>{ const s=Math.floor((Date.now()-t0)/1000);
+  $('#clock').textContent = String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); }, 1000);
+route({'':show,'over':overview,'edit':editor,'*':show});
+</script>

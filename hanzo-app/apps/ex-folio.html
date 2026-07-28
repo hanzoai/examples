@@ -1,0 +1,119 @@
+<!--hz {"title":"Folio","archetype":"portfolio","creator":"web","desc":"Designer/engineer portfolio: animated hero, filterable project grid, case-study detail, skills bars, timeline and a contact form on @hanzo/base.","nav":[["#/","Work"],["#/about","About"],["#/contact","Contact"]]} -->
+<div id="view"></div>
+<script>
+const {h,fill,$,rng,range,fmt,bars,route,wire,toast} = hz;
+const r = rng(77);
+const WORK = [
+ ['Atlas','Design system','A component library and token pipeline shared by four product surfaces.',210,['Tokens','Docs','A11y']],
+ ['Meridian','Data visualisation','A charting layer with one colour formula and a validator, so every chart in the product reads as one system.',268,['SVG','Charts','Palette']],
+ ['Ferry','Developer tooling','A deploy CLI whose entire output is a URL and a diff.',150,['CLI','DX','Go']],
+ ['Quarry','Marketing site','Static site with a content model that non-engineers actually use.',32,['CMS','SEO','Static']],
+ ['Cadence','Mobile app','Scheduling app with an offline-first record store.',340,['Sync','Offline','UX']],
+ ['Bramble','Brand identity','Identity, typography scale and motion grammar for a hardware launch.',190,['Brand','Motion','Type']],
+];
+const SKILLS = [['Interface engineering',92],['Design systems',88],['Data visualisation',80],['Motion & 3D',66],['Accessibility',74],['Backend integration',58]];
+const TIME = [['Now','Independent practice','Product design and front-end engineering for small teams.'],
+ ['Earlier','Staff designer','Owned a design system used across four surfaces and its documentation site.'],
+ ['Before that','Front-end engineer','Shipped the first version of a charting layer still in use.']];
+const view = $('#view');
+let filter='All';
+const TAGS = ['All',...new Set(WORK.flatMap(w=>w[4]))];
+
+const cover = (w,hgt) => h('div',{style:{aspectRatio:hgt||'16/10',borderRadius:'10px',display:'grid',placeItems:'center',
+  color:'#fff',fontWeight:700,fontSize:'22px',letterSpacing:'-.02em',
+  background:`linear-gradient(140deg,hsl(${w[3]} 58% 40%),hsl(${(w[3]+50)%360} 52% 22%))`}}, w[0]);
+
+function hero(){
+  return h('div.card',{style:{padding:'40px 26px',marginBottom:'18px',position:'relative',overflow:'hidden'}},
+    h('canvas',{id:'bg',style:{position:'absolute',inset:0,width:'100%',height:'100%',opacity:.5}}),
+    h('div',{style:{position:'relative'}},
+      h('div.small.muted','Portfolio · official Hanzo example'),
+      h('h1',{style:{fontSize:'clamp(30px,6vw,54px)',margin:'6px 0 10px',letterSpacing:'-.03em'}},
+        'Interfaces that stay legible under load.'),
+      h('p',{style:{maxWidth:'56ch'}},'A demonstration portfolio: six invented case studies covering design systems, data visualisation, tooling and brand. The layout, motion and typography are the point — the projects are placeholders.'),
+      h('div.row',h('a.btn.p',{href:'#/contact'},'Start a project'),h('a.btn',{href:'#/about'},'About this practice'))));
+}
+function work(){
+  const list = WORK.filter(w=>filter==='All'||w[4].includes(filter));
+  fill(view, hero(),
+    h('div.row',{style:{marginBottom:'12px'}},
+      h('h2',{style:{margin:0}},'Selected work'), h('span.spacer'),
+      h('div.row',{style:{gap:'4px'}}, TAGS.map(t=>h('button.sm'+(t===filter?' p':''),{onclick:()=>{filter=t;work();}},t)))),
+    h('div.grid.wide', list.map((w,i)=>h('div.card',{style:{cursor:'pointer'},onclick:()=>{location.hash='#/w/'+i;}},
+      cover(w), h('div.row',{style:{marginTop:'10px'}},h('span.b',w[0]),h('span.spacer'),h('span.small.muted',w[1])),
+      h('p.small',{style:{margin:'6px 0 0'}},w[2])))));
+  paint();
+}
+function detail(i){
+  const w = WORK[+i]; if(!w) return work();
+  fill(view, h('div.split.r',
+    h('div.pane',h('div.body',
+      cover(w,'21/9'),
+      h('div.row',{style:{gap:'6px',margin:'14px 0 4px'}}, w[4].map(t=>h('span.tag.acc',t))),
+      h('h1',w[0]), h('p',{style:{fontSize:'17px'}},w[2]),
+      h('h2','The problem'), h('p','The surface had grown three variants of every control and no shared vocabulary for spacing or colour. Teams were copying components between repositories and drifting apart with each copy.'),
+      h('h2','What was built'), h('p','A single token source compiled to CSS custom properties and native platform formats, a component library consuming only those tokens, and a documentation site generated from the same source so the docs cannot drift from the code.'),
+      h('h2','Outcome'), h('p','This is a demonstration case study. Rather than invent metrics, the outcome section is left descriptive: fewer variants, one vocabulary, and a documentation site that stays in step with the library because both read the same source.'),
+      h('hr'), h('a.btn',{href:'#/'},'‹ All work'))),
+    h('div.col',
+      h('div.pane',h('header','Role'),h('div.body',
+        h('p.small','Design and front-end engineering, end to end.'),
+        h('div.small.muted','Discipline'), h('div.b',{style:{marginBottom:'8px'}},w[1]),
+        h('div.small.muted','Surface'), h('div.b','Web, documentation, tokens'))),
+      h('div.pane',h('header','Next'),h('ul.list', WORK.map((x,j)=>j===+i?null:
+        h('li',{style:{cursor:'pointer'},onclick:()=>{location.hash='#/w/'+j;}},
+          h('span.b',x[0]),h('span.spacer'),h('span.small.muted',x[1]))))))));
+  scrollTo({top:0});
+}
+function about(){
+  fill(view, h('div.split.r',
+    h('div.pane',h('div.body',
+      h('h1','About'),
+      h('p','This portfolio is an official Hanzo example. It exists to show a layout: a hero with a lightweight animated background, a filterable grid, a case-study template, a skills panel and a contact form wired to @hanzo/base.'),
+      h('p','No biography, employer, client or testimonial here describes a real person. Where a real portfolio would carry those, this one carries a description of the pattern instead.'),
+      h('h2','Timeline'),
+      h('ul.list',{style:{border:'1px solid var(--line)',borderRadius:'10px'}}, TIME.map(([k,t,d])=>
+        h('li',{style:{alignItems:'flex-start'}}, h('span.tag',{style:{flex:'none'}},k),
+          h('div',h('div.b',t),h('div.small.muted',d))))))),
+    h('div.pane',h('header','Capabilities'),h('div.body',
+      bars(SKILLS.map(([k,v])=>({k,v,f:v+'%'})))))));
+}
+function contact(){
+  const f = h('form',
+    h('div.row',h('div.field',{style:{flex:1}},h('label','Name'),h('input',{name:'name',required:true})),
+      h('div.field',{style:{flex:1}},h('label','Email'),h('input',{name:'email',type:'email',required:true,placeholder:'you@example.invalid'}))),
+    h('div.row',h('div.field',{style:{flex:1}},h('label','Budget'),h('select',{name:'budget'},['Not sure yet','Under 10k','10k – 50k','50k+'].map(o=>h('option',o)))),
+      h('div.field',{style:{flex:1}},h('label','Timeline'),h('select',{name:'timeline'},['Flexible','This quarter','Urgent'].map(o=>h('option',o))))),
+    h('div.field',h('label','What are you building?'),h('textarea',{name:'brief',required:true,style:{minHeight:'130px'}})),
+    h('button.p',{type:'submit',style:{width:'100%'}},'Send enquiry'));
+  wire(f,'folio.enquiry');
+  fill(view, h('div.split.r',
+    h('div.pane',h('header','Start a project'),h('div.body',f,
+      h('p.hz-note','Submissions are written to @hanzo/base and go nowhere else. No one is on the other end of this form.'))),
+    h('div.pane',h('header','How this works'),h('div.body',
+      h('p.small','A short brief is enough to start. The first reply is usually a set of questions and a rough shape for the work.'),
+      h('p.small','This panel is where a real practice would put availability and a response-time commitment. Because this is a demonstration, it does not make one.')))));
+}
+function paint(){
+  const c = $('#bg'); if(!c) return;
+  const x = c.getContext('2d'); let t=0, raf;
+  const dpr = Math.min(devicePixelRatio||1,2);
+  const size = () => { c.width=c.clientWidth*dpr; c.height=c.clientHeight*dpr; };
+  size(); addEventListener('resize', size);
+  const pts = range(28,()=>({x:Math.random(),y:Math.random(),vx:(Math.random()-.5)*.0006,vy:(Math.random()-.5)*.0006}));
+  (function loop(){
+    if(!document.body.contains(c)) return cancelAnimationFrame(raf);
+    t+=0.005; x.clearRect(0,0,c.width,c.height);
+    pts.forEach(p=>{p.x=(p.x+p.vx+1)%1;p.y=(p.y+p.vy+1)%1;});
+    for(let i=0;i<pts.length;i++) for(let j=i+1;j<pts.length;j++){
+      const a=pts[i],b=pts[j],d=Math.hypot(a.x-b.x,a.y-b.y);
+      if(d<0.19){ x.strokeStyle='rgba(91,140,255,'+(0.5-d*2.4).toFixed(3)+')'; x.lineWidth=1;
+        x.beginPath(); x.moveTo(a.x*c.width,a.y*c.height); x.lineTo(b.x*c.width,b.y*c.height); x.stroke(); }
+    }
+    pts.forEach(p=>{ x.fillStyle='rgba(139,92,246,.65)'; x.beginPath();
+      x.arc(p.x*c.width,p.y*c.height,1.8*dpr,0,7); x.fill(); });
+    raf = requestAnimationFrame(loop);
+  })();
+}
+route({'':work,'about':about,'contact':contact,'w/:i':a=>detail(a.i),'*':work});
+</script>

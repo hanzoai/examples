@@ -1,0 +1,119 @@
+<!--hz {"title":"Pixels","archetype":"realtime multiplayer","creator":"live","desc":"Shared pixel canvas: every open tab and window is a live peer over BroadcastChannel — cursors, placements and chat propagate instantly and the board is shared state.","nav":[["#/","Canvas"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Pixels</h1>
+  <span class="tag acc" id="peers">1 peer</span>
+  <span class="spacer"></span>
+  <span id="pal" class="row" style="gap:4px"></span>
+  <button id="clear" class="g">Clear</button>
+</div>
+<div class="split r">
+  <div class="pane">
+    <header>Shared board <span class="spacer"></span><span class="small muted" id="hint">Click or drag to place</span></header>
+    <canvas id="c" style="width:100%;display:block;background:var(--bg);image-rendering:pixelated;aspect-ratio:1/1;cursor:crosshair"></canvas>
+  </div>
+  <div class="col">
+    <div class="pane"><header>Peers in this browser</header><ul class="list" id="who"></ul></div>
+    <div class="pane" style="display:flex;flex-direction:column;height:260px">
+      <header>Room chat</header>
+      <div class="body chat-log" id="log" style="flex:1"></div>
+      <form id="cf" style="display:flex;gap:6px;padding:10px;border-top:1px solid var(--line)">
+        <input id="msg" placeholder="Say something…" autocomplete="off"><button class="p">Send</button>
+      </form>
+    </div>
+    <div class="pane"><div class="body"><p class="hz-note" style="margin:0">Real multiplayer, honestly scoped: peers are the other tabs and windows of <b>this</b> browser, synchronised over the BroadcastChannel API. Open this page in a second tab to see it work. No server holds the board.</p></div></div>
+  </div>
+</div>
+<script>
+const {h,fill,$,store,uid,avatar,fmt,toast,submit} = hz;
+const N = 48, COLORS = ['#5b8cff','#8b5cf6','#3ecf8e','#f6b73c','#f4685e','#22b8cf','#e879f9','#e7eaf0','#0b0c0f'];
+const me = {id:uid(), name:'Peer-'+Math.random().toString(36).slice(2,5).toUpperCase(),
+  color: COLORS[Math.floor(Math.random()*7)], x:-1, y:-1, at:Date.now()};
+// The board opens with a drawn-in starter pattern: an empty grid is a correct
+// but useless first impression, and every peer that joins later inherits it.
+const START = (() => {
+  const b = Array(N*N).fill(null);
+  const put = (x,y,c) => { if(x>=0&&y>=0&&x<N&&y<N) b[y*N+x]=c; };
+  for(let i=0;i<N;i++){ put(i,0,'#5b8cff'); put(i,N-1,'#5b8cff'); put(0,i,'#8b5cf6'); put(N-1,i,'#8b5cf6'); }
+  const GLYPH = ['1000100011111000','1000100010001000','1111100011110000','1000100010000000','1000100011111000'];
+  GLYPH.forEach((row,y)=>[...row].forEach((c,x)=>{ if(c==='1'){ put(8+x,10+y,'#3ecf8e'); put(8+x,17+y,'#f6b73c'); }}));
+  for(let a=0;a<220;a++){ const t=a/220*Math.PI*2;
+    put(Math.round(24+13*Math.cos(t)), Math.round(33+9*Math.sin(t)), '#f4685e'); }
+  for(let x=4;x<N-4;x++) put(x, 26, x%2 ? '#22b8cf' : '#e879f9');
+  return b;
+})();
+const board = store('pixels.board', START);
+const chat = store('pixels.chat', []);
+const peers = new Map([[me.id, me]]);
+let color = me.color, down=false;
+const bc = 'BroadcastChannel' in self ? new BroadcastChannel('hz-pixels') : null;
+const send = m => bc && bc.postMessage({...m, from:me.id});
+
+const cv = $('#c'), cx = cv.getContext('2d');
+function size(){ const dpr=Math.min(devicePixelRatio||1,2);
+  cv.width=Math.round(cv.clientWidth*dpr); cv.height=cv.width; draw(); }
+function draw(){
+  const b = board.get(), s = cv.width/N;
+  cx.fillStyle = getComputedStyle(document.body).getPropertyValue('--bg2')||'#111';
+  cx.fillRect(0,0,cv.width,cv.height);
+  b.forEach((c,i)=>{ if(!c) return; cx.fillStyle=c; cx.fillRect((i%N)*s,Math.floor(i/N)*s,s,s); });
+  cx.strokeStyle='rgba(128,128,128,.14)'; cx.lineWidth=1;
+  for(let i=0;i<=N;i+=4){ cx.beginPath(); cx.moveTo(i*s,0); cx.lineTo(i*s,cv.height);
+    cx.moveTo(0,i*s); cx.lineTo(cv.width,i*s); cx.stroke(); }
+  peers.forEach(p=>{ if(p.id===me.id||p.x<0) return;
+    cx.fillStyle=p.color; cx.beginPath(); cx.arc(p.x*s+s/2,p.y*s+s/2,s*0.42,0,7); cx.fill();
+    cx.fillStyle='#fff'; cx.font=(s*1.3|0)+'px system-ui'; cx.fillText(p.name.slice(-3), p.x*s+s, p.y*s); });
+}
+function cell(e){ const r0=cv.getBoundingClientRect();
+  return [Math.floor((e.clientX-r0.left)/r0.width*N), Math.floor((e.clientY-r0.top)/r0.height*N)]; }
+function place(x,y,c){
+  if(x<0||y<0||x>=N||y>=N) return;
+  board.set(v=>{ const n=[...v]; n[y*N+x]=c; return n; }); draw();
+}
+cv.addEventListener('pointerdown', e=>{ down=true; const [x,y]=cell(e); place(x,y,color); send({t:'px',x,y,c:color}); });
+addEventListener('pointerup', ()=>down=false);
+cv.addEventListener('pointermove', e=>{ const [x,y]=cell(e);
+  me.x=x; me.y=y; send({t:'cur',x,y,name:me.name,color:me.color});
+  if(down){ place(x,y,color); send({t:'px',x,y,c:color}); } });
+cv.addEventListener('pointerleave', ()=>{ me.x=-1; send({t:'cur',x:-1,y:-1,name:me.name,color:me.color}); });
+
+fill($('#pal'), COLORS.map(c=>h('button.sm',{style:{background:c,width:'26px',height:'26px',padding:0,
+  border:c===color?'2px solid var(--fg)':'1px solid var(--line2)'},
+  onclick:e=>{ color=c; fill($('#pal'),[]); pal(); }})));
+function pal(){ fill($('#pal'), COLORS.map(c=>h('button.sm',{style:{background:c,width:'26px',height:'26px',padding:0,
+  border:c===color?'2px solid var(--fg)':'1px solid var(--line2)'}, onclick:()=>{color=c;pal();}}))); }
+pal();
+$('#clear').onclick = () => { board.set(START.map(()=>null)); draw(); send({t:'clear'}); toast('Board cleared for every peer'); };
+
+function roster(){
+  const now = Date.now();
+  [...peers.values()].forEach(p=>{ if(p.id!==me.id && now-p.at>6000) peers.delete(p.id); });
+  $('#peers').textContent = peers.size + (peers.size===1?' peer':' peers');
+  fill($('#who'), [...peers.values()].map(p=>h('li',
+    h('span',{style:{width:'10px',height:'10px',borderRadius:'50%',background:p.color,flex:'none'}}),
+    h('span'+(p.id===me.id?'.b':''), p.name), p.id===me.id?h('span.tag.acc','you'):null,
+    h('span.spacer'), h('span.small.muted', p.x>=0?p.x+','+p.y:'idle'))));
+}
+function chatUI(){
+  fill($('#log'), chat.get().slice(-40).map(m=>h('div.msg.'+(m.id===me.id?'me':'them'),
+    h('div.who',m.name), m.t)));
+  $('#log').scrollTop = $('#log').scrollHeight;
+}
+$('#cf').onsubmit = async e => { e.preventDefault(); const t=$('#msg').value.trim(); if(!t) return; $('#msg').value='';
+  const m = {id:me.id,name:me.name,t,at:Date.now()};
+  chat.set(v=>[...v,m].slice(-80)); chatUI(); send({t:'chat',m});
+  try{ await submit('pixels.chat', m); }catch(err){} };
+
+if(bc) bc.onmessage = e => {
+  const d = e.data; if(d.from===me.id) return;
+  if(d.t==='px') place(d.x,d.y,d.c);
+  else if(d.t==='clear'){ board.set(Array(N*N).fill(null)); draw(); }
+  else if(d.t==='cur'){ peers.set(d.from,{id:d.from,name:d.name,color:d.color,x:d.x,y:d.y,at:Date.now()}); roster(); draw(); }
+  else if(d.t==='chat'){ chat.set(v=>[...v,d.m].slice(-80)); chatUI(); }
+  else if(d.t==='hi'){ peers.set(d.from,{id:d.from,name:d.name,color:d.color,x:-1,y:-1,at:Date.now()}); roster();
+    send({t:'cur',x:me.x,y:me.y,name:me.name,color:me.color}); }
+};
+if(!bc) $('#hint').textContent = 'BroadcastChannel unavailable — single-peer mode';
+setInterval(()=>{ send({t:'cur',x:me.x,y:me.y,name:me.name,color:me.color}); roster(); }, 2500);
+addEventListener('resize', size);
+send({t:'hi',name:me.name,color:me.color}); size(); roster(); chatUI();
+</script>

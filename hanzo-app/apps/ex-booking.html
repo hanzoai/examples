@@ -1,0 +1,97 @@
+<!--hz {"title":"Timeslot","archetype":"booking / scheduling","creator":"apps","desc":"Appointment booking: month calendar, per-day availability from working hours minus existing bookings, timezone display and a confirm step written to @hanzo/base.","nav":[["#/","Book"],["#/mine","My bookings"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Timeslot</h1>
+  <span class="tag acc" id="tz"></span>
+  <span class="spacer"></span>
+  <select id="svc" style="max-width:230px"></select>
+</div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:18px">A demonstration booking flow. Practitioners and availability are synthetic; confirming a slot writes a record but reserves nothing.</p>
+<script>
+const {h,fill,$,store,rng,range,fmt,modal,toast,submit,route,wire} = hz;
+const r = rng(2024);
+const SERVICES = [
+  {id:'intro', n:'Intro call', mins:30, host:'Ada L', price:0},
+  {id:'review', n:'Architecture review', mins:60, host:'Grace H', price:0},
+  {id:'pair', n:'Pairing session', mins:90, host:'Ken T', price:0},
+];
+const HOURS = [9,10,11,13,14,15,16];
+const bookings = store('timeslot', []);
+const view = $('#view');
+let svc = SERVICES[0], cur = new Date(), sel = null;
+$('#tz').textContent = Intl.DateTimeFormat().resolvedOptions().timeZone + ' · ' + (-new Date().getTimezoneOffset()/60>=0?'+':'') + (-new Date().getTimezoneOffset()/60) + ' UTC';
+fill($('#svc'), SERVICES.map(s=>h('option',{value:s.id},s.n+' · '+s.mins+' min · '+s.host)));
+$('#svc').onchange = e => { svc = SERVICES.find(s=>s.id===e.target.value); sel=null; book(); };
+
+const key = d => d.toISOString().slice(0,10);
+const taken = d => bookings.get().filter(b=>b.day===key(d)).map(b=>b.hour);
+const closed = d => d.getDay()===0 || d.getDay()===6 || d < new Date(new Date().toDateString());
+function slots(d){
+  const seed = rng(+key(d).replace(/-/g,''));
+  return HOURS.filter(hh => seed()>0.28 && !taken(d).includes(hh));
+}
+function cal(){
+  const y=cur.getFullYear(), m=cur.getMonth();
+  const first = new Date(y,m,1), pad = (first.getDay()+6)%7, days = new Date(y,m+1,0).getDate();
+  const cells = [...range(pad,()=>null), ...range(days,i=>new Date(y,m,i+1))];
+  return h('div.pane',
+    h('header', h('button.g.sm',{onclick:()=>{cur=new Date(y,m-1,1);book();}},'‹'),
+      h('span',first.toLocaleDateString('en-US',{month:'long',year:'numeric'})),
+      h('span.spacer'), h('button.g.sm',{onclick:()=>{cur=new Date(y,m+1,1);book();}},'›')),
+    h('div.body',
+      h('div',{style:{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:'4px',marginBottom:'6px'}},
+        ['Mo','Tu','We','Th','Fr','Sa','Su'].map(d=>h('div.small.muted',{style:{textAlign:'center'}},d))),
+      h('div',{style:{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:'4px'}},
+        cells.map(d => !d ? h('div') : (() => {
+          const off = closed(d), n = off?0:slots(d).length, on = sel && key(sel)===key(d);
+          return h('button',{disabled:off||!n, className:on?'p':'',
+            style:{padding:'7px 0',display:'block',width:'100%',opacity:off?.3:1},
+            onclick:()=>{sel=d;book();}},
+            h('div',{style:{fontSize:'13px'}},d.getDate()),
+            h('div',{style:{fontSize:'9px',opacity:.75}}, off?'—':n?n+' free':'full'));
+        })()))));
+}
+function book(){
+  fill(view, h('div.split.r', cal(),
+    h('div.col',
+      h('div.pane',h('header', sel? sel.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}) : 'Pick a day'),
+        h('div.body', sel ? h('div.grid',{style:{gridTemplateColumns:'repeat(auto-fill,minmax(92px,1fr))',gap:'8px'}},
+            slots(sel).map(hh=>h('button',{onclick:()=>confirm(sel,hh)},
+              new Date(2000,0,1,hh).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}))))
+          : h('p.small.muted','Select an available date on the calendar. Weekends and past dates are closed.'))),
+      h('div.pane',h('header','What you are booking'),h('div.body',
+        h('div.row',{style:{justifyContent:'space-between'}},h('span.small.muted','Service'),h('span.b',svc.n)),
+        h('div.row',{style:{justifyContent:'space-between'}},h('span.small.muted','Duration'),h('span.num',svc.mins+' minutes')),
+        h('div.row',{style:{justifyContent:'space-between'}},h('span.small.muted','Host'),h('span',svc.host)),
+        h('div.row',{style:{justifyContent:'space-between'}},h('span.small.muted','Price'),h('span.b','Free')))))));
+}
+function confirm(d,hh){
+  const f = h('form',
+    h('div.field',h('label','Name'),h('input',{name:'name',required:true})),
+    h('div.field',h('label','Email'),h('input',{name:'email',type:'email',required:true,placeholder:'you@example.invalid'})),
+    h('div.field',h('label','What would you like to cover?'),h('textarea',{name:'agenda'})),
+    h('button.p',{type:'submit',style:{width:'100%'}},'Confirm booking'));
+  const dlg = modal('Confirm '+svc.n, h('div',
+    h('div.row',{style:{gap:'6px',marginBottom:'12px'}},
+      h('span.tag.acc',d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})),
+      h('span.tag',new Date(2000,0,1,hh).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})),
+      h('span.tag',svc.mins+' min'),h('span.tag',svc.host)),
+    f));
+  wire(f,'timeslot.booking',(data)=>{
+    bookings.set(v=>[{day:key(d),hour:hh,svc:svc.n,host:svc.host,name:data.name,email:data.email,at:Date.now()},...v]);
+    dlg.close(); sel=d; book(); toast('Booked '+svc.n);
+  });
+}
+function mineView(){
+  const b = bookings.get();
+  fill(view, h('div.pane',h('header','Your bookings'),
+    b.length? h('table',h('thead',h('tr',h('th','When'),h('th','Service'),h('th','Host'),h('th','For'),h('th',''))),
+      h('tbody',b.map((x,i)=>h('tr',
+        h('td',h('div.b',new Date(x.day+'T00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})),
+          h('div.small.muted',new Date(2000,0,1,x.hour).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}))),
+        h('td',x.svc),h('td',x.host),h('td.small',x.name||'—'),
+        h('td',h('button.g.sm',{onclick:()=>{bookings.set(v=>v.filter((_,j)=>j!==i));mineView();toast('Cancelled');}},'Cancel'))))))
+      : h('div.empty','No bookings yet — pick a slot on the Book tab.')));
+}
+route({'':book,'mine':mineView,'*':book});
+</script>

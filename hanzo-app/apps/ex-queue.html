@@ -1,0 +1,107 @@
+<!--hz {"title":"Queue","archetype":"infrastructure / job queue","creator":"data","desc":"Job queue inspector: a live worker pool that really processes synthetic jobs with retries and exponential backoff, a dead-letter queue you can replay, throughput and latency charts, and per-queue depth.","nav":[["#/","Jobs"],["#/dlq","Dead letters"],["#/metrics","Metrics"]]} -->
+<div class="row" style="margin-bottom:14px">
+  <h1 style="margin:0">Queue</h1><span class="tag" id="depth"></span>
+  <span class="spacer"></span>
+  <label class="small muted">Workers <input id="workers" type="range" min="1" max="8" value="3" style="width:100px;vertical-align:middle"></label>
+  <label class="small muted">Arrival <input id="rate" type="range" min="0" max="12" value="4" style="width:100px;vertical-align:middle"></label>
+  <button id="pause">⏸</button><button class="g" id="flush">Flush</button>
+</div>
+<div class="grid k4" id="tiles" style="margin-bottom:16px"></div>
+<div id="view"></div>
+<p class="hz-note" style="margin-top:16px">The workers are real timers doing real state transitions with exponential backoff — this is a simulation of a queue, not a recording of one. Nothing is dispatched off this page.</p>
+<script>
+const {h,fill,$,store,rng,range,pick,uid,fmt,area,bars,grid,toast,submit,route} = hz;
+const r = rng(6161);
+const QUEUES = ['deploys','emails','thumbnails','webhooks'];
+const KINDS = {deploys:'site.deploy', emails:'email.send', thumbnails:'image.resize', webhooks:'hook.deliver'};
+let jobs = [], dlq = [], done = [], running = true, workers = 3, rate = 4, tick = 0;
+const hist = {tp: range(60,()=>0), lat: range(60,()=>0)};
+const view = $('#view');
+
+function enqueue(){
+  const q = pick(Math.random, QUEUES);
+  jobs.push({id:'job_'+uid(), q, kind:KINDS[q], state:'queued', attempts:0, max:3,
+    at:Date.now(), next:Date.now(), work: 300+Math.random()*1600,
+    payload:{slug:'app-'+Math.floor(Math.random()*90+10)}});
+}
+function step(){
+  tick++;
+  if(running){
+    for(let i=0;i<rate;i++) if(Math.random()<0.55) enqueue();
+    const active = jobs.filter(j=>j.state==='running').length;
+    jobs.filter(j=>j.state==='queued' && j.next<=Date.now())
+      .slice(0, Math.max(0, workers-active))
+      .forEach(j=>{ j.state='running'; j.started=Date.now(); });
+    jobs.filter(j=>j.state==='running').forEach(j=>{
+      if(Date.now()-j.started < j.work) return;
+      j.attempts++;
+      const failed = Math.random() < 0.22;
+      if(!failed){ j.state='done'; j.took=Date.now()-j.at; done.push(j); }
+      else if(j.attempts >= j.max){ j.state='dead'; j.error='handler returned 500'; dlq.push(j); }
+      else { j.state='queued'; j.next = Date.now() + Math.pow(2,j.attempts)*400; j.error='retry '+j.attempts; }
+    });
+    jobs = jobs.filter(j=>j.state==='queued'||j.state==='running');
+    if(done.length>400) done = done.slice(-400);
+    const win = done.filter(j=>Date.now()-j.at < 5000);
+    hist.tp = [...hist.tp.slice(1), win.length];
+    hist.lat = [...hist.lat.slice(1), win.length? Math.round(win.reduce((a,j)=>a+j.took,0)/win.length) : 0];
+  }
+  tiles();
+  const at = location.hash.replace(/^#\/?/,'');
+  at==='dlq'? dlqView() : at==='metrics'? metrics() : list();
+}
+function tiles(){
+  $('#depth').textContent = jobs.length+' in flight · '+dlq.length+' dead';
+  $('#depth').className = 'tag '+(dlq.length>6?'bad':jobs.length>40?'warn':'ok');
+  fill($('#tiles'),
+    h('div.stat',h('div.k','Queued'),h('div.v',jobs.filter(j=>j.state==='queued').length)),
+    h('div.stat',h('div.k','Running'),h('div.v.up',jobs.filter(j=>j.state==='running').length)),
+    h('div.stat',h('div.k','Completed'),h('div.v',fmt.n(done.length))),
+    h('div.stat',h('div.k','Dead letters'),h('div.v.'+(dlq.length?'down':'up'),dlq.length)));
+}
+function list(){
+  const rows = [...jobs].sort((a,b)=>a.at-b.at).slice(0,80);
+  fill(view, h('div.split.r',
+    h('div.pane', h('header','In flight'), grid([
+      {k:'id',t:'Job',cell:j=>h('span.mono.small',j.id.slice(0,12))},
+      {k:'q',t:'Queue',cell:j=>h('span.tag',j.q)},
+      {k:'kind',t:'Handler',cell:j=>h('span.mono.small',j.kind)},
+      {k:'state',t:'State',cell:j=>h('span.tag '+(j.state==='running'?'warn':''),j.state)},
+      {k:'attempts',t:'Try',num:true,cell:j=>j.attempts+'/'+j.max},
+      {k:'at',t:'Age',num:true,cell:j=>Math.round((Date.now()-j.at)/100)/10+'s'},
+    ], rows, {noSearch:true, empty:'Queue drained'})),
+    h('div.pane',h('header','Depth by queue'),h('div.body',
+      bars(QUEUES.map(q=>({k:q, v:jobs.filter(j=>j.q===q).length,
+        f:jobs.filter(j=>j.q===q).length+' jobs'})))))));
+}
+function dlqView(){
+  fill(view, h('div.pane',
+    h('header','Dead letters · '+dlq.length, h('span.spacer'),
+      h('button.sm',{onclick:()=>{ if(!dlq.length) return toast('Nothing to replay');
+        dlq.forEach(j=>{ j.state='queued'; j.attempts=0; j.next=Date.now(); jobs.push(j); });
+        submit('queue.replay',{count:dlq.length}).catch(()=>{}); dlq=[];
+        toast('Replayed'); }},'Replay all'),
+      h('button.g.sm',{onclick:()=>{dlq=[];dlqView();}},'Purge')),
+    dlq.length? h('table',h('thead',h('tr',h('th','Job'),h('th','Queue'),h('th','Attempts'),h('th','Error'),h('th','Age'),h('th',''))),
+      h('tbody', dlq.slice(-60).reverse().map(j=>h('tr',
+        h('td.mono.small',j.id.slice(0,12)), h('td',h('span.tag',j.q)),
+        h('td.num',j.attempts), h('td.small.down',j.error),
+        h('td.small.muted',fmt.ago(j.at)),
+        h('td',h('button.sm',{onclick:()=>{ j.state='queued'; j.attempts=0; j.next=Date.now();
+          jobs.push(j); dlq=dlq.filter(x=>x!==j); dlqView(); toast('Requeued'); }},'Retry'))))))
+      : h('div.empty','No dead letters. Raise the arrival rate and wait — about one job in five fails on purpose.')));
+}
+function metrics(){
+  fill(view, h('div.split',
+    h('div.pane',h('header','Throughput · completions per 5-second window'),h('div.body',
+      area(hist.tp, hist.tp.map((_,i)=>(i-59)+'s'), '#3ecf8e'))),
+    h('div.pane',h('header','Mean latency (ms) end to end'),h('div.body',
+      area(hist.lat, hist.lat.map((_,i)=>(i-59)+'s'), '#f6b73c')))));
+}
+$('#workers').oninput = e => { workers = +e.target.value; };
+$('#rate').oninput = e => { rate = +e.target.value; };
+$('#pause').onclick = () => { running = !running; $('#pause').textContent = running?'⏸':'▶'; };
+$('#flush').onclick = () => { jobs=[]; dlq=[]; done=[]; toast('Queues flushed'); step(); };
+route({'':list,'dlq':dlqView,'metrics':metrics,'*':list});
+setInterval(step, 500); step();
+</script>

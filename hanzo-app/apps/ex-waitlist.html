@@ -1,0 +1,105 @@
+<!--hz {"title":"Liftoff","archetype":"waitlist / launch page","creator":"web","desc":"Product launch page: animated gradient hero, countdown, feature grid, pricing, FAQ accordion and a waitlist form that writes to @hanzo/base and shows a queue position.","nav":[["#/","Home"],["#/pricing","Pricing"],["#/faq","FAQ"]]} -->
+<div id="view"></div>
+<script>
+const {h,fill,$,store,rng,range,fmt,route,wire,toast,submit,donut} = hz;
+const view = $('#view');
+const joined = store('liftoff.joined', null);
+const LAUNCH = Date.now() + 1000*60*60*24*18;
+
+const FEATURES = [
+ ['One deploy path','A manifest of paths and contents goes in; a live URL comes out. No build server sits between the two.'],
+ ['Releases you can undo','Every release is addressed by the digest of its contents, so a rollback is activating an older id.'],
+ ['Data without a backend','Each published page can persist records on its own origin, so a form works the moment the page is live.'],
+ ['Edge by default','Wildcard TLS covers every subdomain, so a newly published slug is reachable over HTTPS immediately.'],
+ ['Shared runtime','Analytics and support chat are injected at publish time and updated in one place, never per site.'],
+ ['Honest limits','Four mebibytes per deploy body, five thousand files per artifact. Documented, not discovered.'],
+];
+const PLANS = [
+ ['Hobby','$0','forever',['1 project','Community support','Default subdomain','Shared runtime'],false],
+ ['Team','$29','per member / month',['Unlimited projects','Custom domains','Release history','Priority support'],true],
+ ['Scale','Custom','annual',['Everything in Team','SSO and SCIM','Audit export','Dedicated capacity'],false],
+];
+const FAQ = [
+ ['Is this a real product page?','No. It is an official Hanzo example that demonstrates the launch-page pattern: hero, countdown, feature grid, pricing table, FAQ and a waitlist form. Nothing here is for sale and no one is charged.'],
+ ['Where does the waitlist form go?','Into @hanzo/base, on this page’s own origin, using the submissions collection every published site gets. The record is stored; no email is sent.'],
+ ['Are the numbers real?','The countdown is computed from the time you loaded the page. The queue position is derived from your own submissions in this browser. No signup, revenue or customer count is claimed.'],
+ ['Can I copy this page?','That is what it is for. It is one HTML file plus a shared kit, published through the same deploy endpoint any other site uses.'],
+];
+
+function counter(){
+  const el = h('div.row',{style:{gap:'10px',marginTop:'18px'}});
+  const tick = () => { const ms = LAUNCH-Date.now();
+    const u = [['days',864e5],['hours',36e5],['minutes',6e4],['seconds',1000]];
+    let rest = ms;
+    fill(el, u.map(([n,d])=>{ const v = Math.floor(rest/d); rest -= v*d;
+      return h('div.stat',{style:{minWidth:'86px',textAlign:'center'}},
+        h('div.v.num',String(v).padStart(2,'0')), h('div.k',n)); }));
+    if(document.body.contains(el)) setTimeout(tick,1000); };
+  tick(); return el;
+}
+function form(){
+  const f = h('form',{style:{maxWidth:'440px'}},
+    h('div.inline',
+      h('input',{name:'email',type:'email',required:true,placeholder:'you@example.invalid'}),
+      h('button.p',{type:'submit'},'Join waitlist')),
+    h('div.row',{style:{gap:'14px',marginTop:'8px'}},
+      h('label.inline',{style:{gap:'6px'}},h('input',{type:'checkbox',name:'updates',checked:true}),h('span.small','Send me product updates')),
+      h('label.inline',{style:{gap:'6px'}},h('input',{type:'checkbox',name:'beta'}),h('span.small','I want early access'))));
+  return wire(f,'liftoff.waitlist',(d)=>{ joined.set({email:d.email, at:Date.now(), pos: 1200 + Math.floor(Math.random()*180)}); home(); });
+}
+function home(){
+  const j = joined.get();
+  fill(view,
+    h('div.card',{style:{padding:'44px 26px',position:'relative',overflow:'hidden',marginBottom:'18px'}},
+      h('div',{style:{position:'absolute',inset:'-40%',background:
+        'radial-gradient(closest-side,#5b8cff55,transparent),radial-gradient(closest-side,#8b5cf655,transparent)',
+        backgroundPosition:'20% 30%,80% 70%',backgroundSize:'55% 55%,60% 60%',backgroundRepeat:'no-repeat',
+        animation:'none',filter:'blur(6px)'}}),
+      h('div',{style:{position:'relative',maxWidth:'720px'}},
+        h('span.tag.acc','Launching soon'),
+        h('h1',{style:{fontSize:'clamp(30px,6vw,52px)',margin:'12px 0',letterSpacing:'-.03em',lineHeight:'1.05'}},
+          'Publish a site the same way every time.'),
+        h('p',{style:{fontSize:'17px'}},'One endpoint, content-addressed releases, a data space per project and a rollback that is a pointer flip. Join the list to hear when it opens up.'),
+        j ? h('div.card',{style:{maxWidth:'440px'}},
+              h('div.b','You are on the list'),
+              h('p.small',{style:{margin:'6px 0'}}, j.email+' · joined '+fmt.ago(j.at)),
+              h('div.row',h('span.tag.ok','position ~'+fmt.n(j.pos)),
+                h('button.g.sm',{onclick:()=>{joined.set(null);home();}},'Leave the list')))
+            : form(),
+        counter())),
+    h('h2',{style:{margin:'22px 0 12px'}},'What you get'),
+    h('div.grid.wide', FEATURES.map(([t,d])=>h('div.card',h('h3',t),h('p.small',{style:{margin:0}},d)))),
+    h('div.card',{style:{marginTop:'18px'}},
+      h('h3','Where the waitlist goes'),
+      h('p.small','Every submission is written to the submissions collection of this site’s own Base space, using the endpoint served on this origin. That is the same path any published page uses for a form — there is no separate backend behind this page.'),
+      h('pre',{style:{marginTop:'8px'}},'POST /v1/base/collections/submissions/records\\n{ "form": "liftoff.waitlist", "data": { "email": "…" } }')));
+}
+function pricing(){
+  fill(view, h('div',
+    h('h1','Pricing'),
+    h('p','A demonstration pricing table. No plan can be purchased and no payment method is collected anywhere on this site.'),
+    h('div.grid.wide', PLANS.map(([n,p,per,feats,hot])=>h('div.card',
+      {style:hot?{borderColor:'var(--acc)',boxShadow:'0 0 0 1px var(--acc)'}:null},
+      h('div.row',h('h3',{style:{margin:0}},n), h('span.spacer'), hot?h('span.tag.acc','Popular'):null),
+      h('div',{style:{fontSize:'32px',fontWeight:680,margin:'8px 0 2px'}},p),
+      h('div.small.muted',per),
+      h('ul.list',{style:{margin:'12px 0'}}, feats.map(f=>h('li',h('span.small','✓  '+f)))),
+      h('button'+(hot?'.p':''),{style:{width:'100%'},onclick:()=>{submit('liftoff.plan',{plan:n}).catch(()=>{});toast('Interest recorded — nothing was charged');}},'Choose '+n)))),
+    h('div.pane',{style:{marginTop:'18px'}},h('header','Plan comparison'),h('div.body',
+      donut(PLANS.map((p,i)=>({k:p[0], v:[60,30,10][i]})), 150),
+      h('p.hz-note',{style:{marginTop:'10px'}},'The split above is illustrative filler, not a distribution of real customers.')))));
+}
+function faq(){
+  fill(view, h('div',{style:{maxWidth:'760px'}},
+    h('h1','Questions'),
+    h('div.col', FAQ.map(([q,a])=>{
+      const body = h('div.body',{style:{display:'none'}}, h('p.small',{style:{margin:0}},a));
+      return h('div.pane', h('header',{style:{cursor:'pointer'},
+        onclick:()=>{ body.style.display = body.style.display==='none'?'':'none'; }},
+        h('span',q), h('span.spacer'), h('span.muted','＋')), body);
+    })),
+    h('div.card',{style:{marginTop:'16px'}}, h('h3','Still curious?'),
+      h('p.small','This page is one file. Read it, copy it, publish your own.'))));
+}
+route({'':home,'pricing':pricing,'faq':faq,'*':home});
+</script>

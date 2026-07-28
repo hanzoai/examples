@@ -1,0 +1,124 @@
+<!--hz {"title":"Arena","archetype":"realtime multiplayer game","creator":"live","desc":"Top-down multiplayer arena: every open tab is a live player over BroadcastChannel — movement, collision, orb collection, a shared scoreboard and a 90-second round timer.","nav":[["#/","Play"]]} -->
+<div class="row" style="margin-bottom:10px">
+  <h1 style="margin:0">Arena</h1>
+  <span class="tag acc" id="players">1 player</span>
+  <span class="tag" id="timer">90s</span>
+  <span class="spacer"></span>
+  <input id="nick" placeholder="Nickname" style="max-width:150px">
+  <button id="again">New round</button>
+</div>
+<div class="split r">
+  <div class="pane"><header>Field <span class="spacer"></span><span class="small muted">WASD or arrow keys · collect the orbs</span></header>
+    <canvas id="c" style="width:100%;display:block;background:#080a10;aspect-ratio:16/10"></canvas></div>
+  <div class="col">
+    <div class="pane"><header>Scoreboard</header><ul class="list" id="board"></ul></div>
+    <div class="pane"><div class="body"><p class="hz-note" style="margin:0">Genuine multiplayer, honestly scoped: the other players are the other tabs and windows of <b>this</b> browser, synchronised over the BroadcastChannel API at 20 Hz. Open a second tab to play against yourself. No server holds the game state.</p></div></div>
+  </div>
+</div>
+<script>
+const {h,fill,$,store,uid,rng,range,fmt,toast,submit} = hz;
+const W = 1000, H = 625, R = 14;
+const me = {id:uid(), name:'Player-'+Math.random().toString(36).slice(2,5).toUpperCase(),
+  x: 120+Math.random()*760, y: 100+Math.random()*420, vx:0, vy:0,
+  hue: Math.floor(Math.random()*360), score:0, at:Date.now()};
+$('#nick').value = me.name;
+$('#nick').oninput = e => { me.name = e.target.value.slice(0,14) || 'Player'; };
+const others = new Map();
+const bc = 'BroadcastChannel' in self ? new BroadcastChannel('hz-arena') : null;
+const send = m => bc && bc.postMessage({...m, from:me.id});
+const cv = $('#c'), cx = cv.getContext('2d');
+const keys = {};
+let orbs = [], roundEnd = Date.now()+90000, host = true;
+
+function newOrbs(seed){
+  const r = rng(seed);
+  orbs = range(14, i => ({i, x: 60+r()*(W-120), y: 60+r()*(H-120), got:false, v: 1+Math.floor(r()*3)}));
+}
+newOrbs(Math.floor(Date.now()/1e5));
+addEventListener('keydown', e => { if(e.target.tagName==='INPUT') return;
+  keys[e.key.toLowerCase()]=true; if(e.key.startsWith('Arrow')) e.preventDefault(); });
+addEventListener('keyup', e => keys[e.key.toLowerCase()]=false);
+cv.addEventListener('pointerdown', e => { const r0=cv.getBoundingClientRect();
+  me.tx = (e.clientX-r0.left)/r0.width*W; me.ty = (e.clientY-r0.top)/r0.height*H; });
+
+function step(dt){
+  const A = 0.55, F = 0.90;
+  if(keys.w||keys.arrowup) me.vy -= A;
+  if(keys.s||keys.arrowdown) me.vy += A;
+  if(keys.a||keys.arrowleft) me.vx -= A;
+  if(keys.d||keys.arrowright) me.vx += A;
+  if(me.tx!=null){ const dx=me.tx-me.x, dy=me.ty-me.y, d=Math.hypot(dx,dy);
+    if(d<6){ me.tx=null; } else { me.vx += dx/d*A*0.85; me.vy += dy/d*A*0.85; } }
+  me.vx*=F; me.vy*=F;
+  me.x = Math.max(R, Math.min(W-R, me.x+me.vx));
+  me.y = Math.max(R, Math.min(H-R, me.y+me.vy));
+  orbs.forEach(o=>{ if(o.got) return;
+    if(Math.hypot(o.x-me.x, o.y-me.y) < R+9){ o.got=true; me.score+=o.v;
+      send({t:'orb', i:o.i}); board(); } });
+  // soft collision so players push rather than overlap
+  others.forEach(p=>{ const dx=me.x-p.x, dy=me.y-p.y, d=Math.hypot(dx,dy);
+    if(d>0 && d<R*2){ me.x += dx/d*(R*2-d)*0.5; me.y += dy/d*(R*2-d)*0.5; } });
+}
+function draw(){
+  const dpr = Math.min(devicePixelRatio||1,2);
+  if(cv.width !== Math.round(cv.clientWidth*dpr)){
+    cv.width = Math.round(cv.clientWidth*dpr); cv.height = Math.round(cv.width*H/W); }
+  const s = cv.width/W;
+  cx.setTransform(s,0,0,s,0,0);
+  cx.fillStyle='#080a10'; cx.fillRect(0,0,W,H);
+  cx.strokeStyle='rgba(120,130,160,.10)'; cx.lineWidth=1;
+  for(let x=0;x<=W;x+=50){cx.beginPath();cx.moveTo(x,0);cx.lineTo(x,H);cx.stroke();}
+  for(let y=0;y<=H;y+=50){cx.beginPath();cx.moveTo(0,y);cx.lineTo(W,y);cx.stroke();}
+  const t = performance.now()/300;
+  orbs.forEach(o=>{ if(o.got) return;
+    const pr = 7 + Math.sin(t+o.i)*1.6;
+    cx.beginPath(); cx.arc(o.x,o.y,pr+5,0,7);
+    cx.fillStyle=['rgba(91,140,255,.18)','rgba(62,207,142,.18)','rgba(246,183,60,.18)'][o.v-1]; cx.fill();
+    cx.beginPath(); cx.arc(o.x,o.y,pr,0,7);
+    cx.fillStyle=['#5b8cff','#3ecf8e','#f6b73c'][o.v-1]; cx.fill(); });
+  const all = [me, ...others.values()];
+  all.forEach(p=>{
+    cx.beginPath(); cx.arc(p.x,p.y,R,0,7);
+    cx.fillStyle=`hsl(${p.hue} 62% 55%)`; cx.fill();
+    cx.lineWidth=2; cx.strokeStyle = p.id===me.id? '#fff':'rgba(255,255,255,.35)'; cx.stroke();
+    cx.fillStyle='#e7eaf0'; cx.font='12px system-ui'; cx.textAlign='center';
+    cx.fillText(p.name, p.x, p.y-R-6); });
+  cx.textAlign='left';
+}
+function board(){
+  const all = [me, ...others.values()].sort((a,b)=>b.score-a.score);
+  $('#players').textContent = all.length + (all.length===1?' player':' players');
+  fill($('#board'), all.map((p,i)=>h('li',
+    h('span.tag',i+1),
+    h('span',{style:{width:'10px',height:'10px',borderRadius:'50%',flex:'none',background:`hsl(${p.hue} 62% 55%)`}}),
+    h('span'+(p.id===me.id?'.b':''),p.name),
+    h('span.spacer'), h('span.b.num',p.score))));
+}
+function loop(){
+  step();
+  draw();
+  const left = Math.max(0, Math.ceil((roundEnd-Date.now())/1000));
+  $('#timer').textContent = left+'s';
+  $('#timer').className = 'tag '+(left<15?'bad':left<30?'warn':'');
+  if(left===0 && !loop.ended){ loop.ended = true; endRound(); }
+  requestAnimationFrame(loop);
+}
+function endRound(){
+  const all = [me, ...others.values()].sort((a,b)=>b.score-a.score);
+  toast(all[0].id===me.id? 'You won with '+me.score+' points' : all[0].name+' won with '+all[0].score);
+  submit('arena.round',{score:me.score, players:all.length, won:all[0].id===me.id}).catch(()=>{});
+}
+$('#again').onclick = () => { const seed = Math.floor(Date.now()/1000);
+  newOrbs(seed); roundEnd = Date.now()+90000; loop.ended=false; me.score=0;
+  send({t:'round', seed, end:roundEnd}); board(); toast('New round'); };
+if(bc) bc.onmessage = e => {
+  const d = e.data; if(d.from===me.id) return;
+  if(d.t==='pos'){ others.set(d.from, {id:d.from, name:d.name, x:d.x, y:d.y, hue:d.hue, score:d.score, at:Date.now()}); board(); }
+  else if(d.t==='orb'){ const o=orbs[d.i]; if(o) o.got=true; }
+  else if(d.t==='round'){ newOrbs(d.seed); roundEnd=d.end; loop.ended=false; me.score=0; board(); }
+  else if(d.t==='hi'){ send({t:'round', seed:0, end:roundEnd}); }
+};
+setInterval(()=>{ send({t:'pos', x:me.x, y:me.y, name:me.name, hue:me.hue, score:me.score});
+  others.forEach((p,k)=>{ if(Date.now()-p.at>4000) others.delete(k); }); board(); }, 50);
+send({t:'hi'}); board(); loop();
+</script>

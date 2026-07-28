@@ -1,0 +1,113 @@
+<!--hz {"title":"Screen","archetype":"realtime video / screen capture","creator":"live","desc":"Screen capture studio: real getDisplayMedia sharing, live track statistics, picture-in-picture, MediaRecorder capture to a downloadable WebM file and a frame grabber that exports PNG stills.","nav":[["#/","Capture"]]} -->
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">Screen</h1><span class="tag" id="state">idle</span>
+  <span class="spacer"></span>
+  <button class="p" id="share">Share a screen</button>
+  <button id="rec" disabled>● Record</button>
+  <button id="grab" disabled>Grab frame</button>
+  <button id="pip" disabled>Picture-in-picture</button>
+  <button id="stop" disabled>Stop</button>
+</div>
+<div class="split r">
+  <div class="pane"><header>Preview <span class="spacer"></span><span class="small muted" id="dim">—</span></header>
+    <video id="v" autoplay playsinline muted style="width:100%;display:block;background:#000;aspect-ratio:16/9;object-fit:contain"></video></div>
+  <div class="col">
+    <div class="pane"><header>Track</header><div class="body" id="info"></div></div>
+    <div class="pane"><header>Recordings</header><ul class="list" id="recs"></ul></div>
+    <div class="pane"><header>Stills</header><div class="body grid" id="stills" style="gap:8px"></div></div>
+  </div>
+</div>
+<p class="hz-note" style="margin-top:14px">This uses the real screen-capture API. Nothing is uploaded: recordings and stills are produced by your browser and stay on your machine. Only the fact that a capture happened, its resolution and its duration are recorded in @hanzo/base.</p>
+<script>
+const {h,fill,$,fmt,toast,submit} = hz;
+let stream, rec, chunks = [], t0, statsTimer;
+const v = $('#v');
+const set = (s,cls) => { $('#state').textContent = s; $('#state').className = 'tag '+(cls||''); };
+
+$('#share').onclick = async () => {
+  if(!navigator.mediaDevices?.getDisplayMedia){
+    set('unsupported','bad');
+    return fill($('#info'), h('p.small','This browser does not expose getDisplayMedia. Everything else on the page still works — the capture controls simply have nothing to capture.'));
+  }
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({video:{frameRate:30}, audio:false});
+    v.srcObject = stream;
+    set('sharing','ok');
+    ['rec','grab','pip','stop'].forEach(id=>$('#'+id).disabled=false);
+    $('#share').disabled = true;
+    stream.getVideoTracks()[0].addEventListener('ended', stopAll);
+    statsTimer = setInterval(info, 1000); info();
+    submit('screen.capture',{event:'started'}).catch(()=>{});
+  } catch(e){
+    set('permission denied','bad');
+    fill($('#info'), h('p.small','The browser declined the capture: '+e.name+'. Press "Share a screen" again and choose a window or tab.'));
+  }
+};
+function info(){
+  const t = stream?.getVideoTracks()[0];
+  if(!t) return;
+  const s = t.getSettings();
+  $('#dim').textContent = (s.width||v.videoWidth)+'×'+(s.height||v.videoHeight)+' @ '+Math.round(s.frameRate||0)+' fps';
+  fill($('#info'), h('table',h('tbody',
+    [['Label', t.label || '(hidden by the browser)'],
+     ['Kind', t.kind], ['State', t.readyState],
+     ['Resolution', (s.width||'—')+'×'+(s.height||'—')],
+     ['Frame rate', Math.round(s.frameRate||0)+' fps'],
+     ['Display surface', s.displaySurface || 'unknown'],
+     ['Cursor', s.cursor || 'unknown'],
+     ['Recording', rec?.state === 'recording' ? Math.round((Date.now()-t0)/1000)+' s' : 'no']]
+    .map(([k,val])=>h('tr',h('td.small.muted',k),h('td.b',String(val)))))));
+}
+$('#rec').onclick = () => {
+  if(rec?.state === 'recording'){
+    rec.stop(); $('#rec').textContent = '● Record'; set('sharing','ok'); return;
+  }
+  if(!window.MediaRecorder) return toast('MediaRecorder is unavailable in this browser');
+  chunks = []; t0 = Date.now();
+  const type = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm']
+    .find(t=>MediaRecorder.isTypeSupported(t)) || '';
+  rec = new MediaRecorder(stream, type? {mimeType:type} : undefined);
+  rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+  rec.onstop = () => {
+    const blob = new Blob(chunks, {type: rec.mimeType || 'video/webm'});
+    const url = URL.createObjectURL(blob), secs = Math.round((Date.now()-t0)/1000);
+    const li = h('li',
+      h('div',{style:{minWidth:0}}, h('div.small.b','Recording · '+secs+' s'),
+        h('div.small.muted', fmt.kb(blob.size)+' · '+(rec.mimeType||'video/webm'))),
+      h('span.spacer'),
+      h('a.btn.sm',{href:url, download:'screen-'+Date.now()+'.webm'},'Download'),
+      h('button.g.sm',{onclick:()=>{ v.srcObject=null; v.src=url; v.controls=true; v.play(); }},'Play'));
+    $('#recs').prepend(li);
+    submit('screen.recording',{seconds:secs, bytes:blob.size, type:rec.mimeType}).catch(()=>{});
+    toast('Recording ready — '+fmt.kb(blob.size));
+  };
+  rec.start(1000);
+  $('#rec').textContent = '■ Stop recording'; set('recording','bad');
+};
+$('#grab').onclick = () => {
+  const c = h('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v,0,0);
+  const url = c.toDataURL('image/png');
+  $('#stills').prepend(h('div',
+    h('img',{src:url, style:{width:'100%',borderRadius:'6px',cursor:'pointer'},
+      onclick:()=>h('a',{href:url,download:'frame-'+Date.now()+'.png'}).click()}),
+    h('div.small.muted',{style:{marginTop:'4px'}}, c.width+'×'+c.height)));
+  toast('Frame captured — click it to save');
+};
+$('#pip').onclick = async () => {
+  try { document.pictureInPictureElement ? await document.exitPictureInPicture()
+    : await v.requestPictureInPicture(); }
+  catch(e){ toast('Picture-in-picture unavailable: '+e.name); }
+};
+function stopAll(){
+  clearInterval(statsTimer);
+  if(rec?.state === 'recording') rec.stop();
+  stream?.getTracks().forEach(t=>t.stop());
+  stream = null; v.srcObject = null;
+  ['rec','grab','pip','stop'].forEach(id=>$('#'+id).disabled=true);
+  $('#share').disabled = false; $('#rec').textContent='● Record';
+  set('stopped');
+}
+$('#stop').onclick = stopAll;
+fill($('#info'), h('p.small','Press "Share a screen" and choose a window, tab or display. Every value on this panel is read from the live MediaStreamTrack.'));
+</script>

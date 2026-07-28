@@ -1,0 +1,159 @@
+<!--hz {"title":"Flow","archetype":"node graph editor / automation","creator":"apps","desc":"Visual automation builder: draggable nodes wired by bezier edges, a real topological execution engine that runs the graph and shows each node's output, plus cycle detection and JSON export.","nav":[["#/","Canvas"]]} -->
+<div class="row" style="margin-bottom:10px">
+  <h1 style="margin:0">Flow</h1><span class="tag" id="stat"></span>
+  <span class="spacer"></span>
+  <span id="palette" class="row" style="gap:4px"></span>
+  <button class="p" id="run">▶ Run</button><button id="json">Export</button><button class="g" id="reset">Reset</button>
+</div>
+<div class="split r">
+  <div class="pane"><header>Graph <span class="spacer"></span><span class="small muted">Drag nodes · drag from a right port to a left port to connect</span></header>
+    <div id="canvas" style="position:relative;height:520px;overflow:hidden;background:
+      radial-gradient(circle at 1px 1px, rgba(128,128,128,.2) 1px, transparent 0) 0 0/22px 22px"></div></div>
+  <div class="pane"><header>Run log</header><div class="body" id="log" style="max-height:520px;overflow:auto"></div></div>
+</div>
+<script>
+const {h,fill,$,$$,store,uid,fmt,toast,submit} = hz;
+const TYPES = {
+  trigger:{t:'Trigger', c:'#8b5cf6', ins:0, run:()=>({event:'site.deployed', slug:'my-app', files:12})},
+  fetch:{t:'HTTP GET', c:'#5b8cff', ins:1, run:async(i,n)=>{
+    const res = await fetch(n.path||'/.well-known/hanzo-example.json');
+    return {status:res.status, bytes:(await res.text()).length, path:n.path||'/.well-known/hanzo-example.json'}; }},
+  filter:{t:'Filter', c:'#f6b73c', ins:1, run:(i,n)=>{
+    const ok = JSON.stringify(i[0]??'').includes(n.match||'true');
+    return ok ? i[0] : {filtered:true, because:'no match for "'+(n.match||'true')+'"'}; }},
+  map:{t:'Transform', c:'#22b8cf', ins:1, run:(i,n)=>({
+    summary: Object.entries(i[0]||{}).slice(0,3).map(([k,v])=>k+'='+String(v).slice(0,24)).join(' · '),
+    keys: Object.keys(i[0]||{}).length })},
+  merge:{t:'Merge', c:'#e879f9', ins:2, run:i=>Object.assign({}, ...i.filter(Boolean))},
+  base:{t:'Write to Base', c:'#3ecf8e', ins:1, run:async(i)=>{
+    const r = await hz.submit('flow.node', i[0]||{}); return {record:r.id, collection:r.collectionName}; }},
+};
+const SEED = {
+  nodes:[
+    {id:'n1', type:'trigger', x:30,  y:40},
+    {id:'n2', type:'fetch',   x:250, y:30, path:'/.well-known/hanzo-example.json'},
+    {id:'n3', type:'filter',  x:250, y:170, match:'my-app'},
+    {id:'n4', type:'merge',   x:470, y:100},
+    {id:'n5', type:'map',     x:470, y:250},
+    {id:'n6', type:'base',    x:680, y:170},
+  ],
+  edges:[['n1','n2',0],['n1','n3',0],['n2','n4',0],['n3','n4',1],['n4','n5',0],['n5','n6',0]],
+};
+const g = store('flow.graph', SEED);
+const cvs = $('#canvas');
+let drag=null, wire=null, results={};
+
+function bez(x1,y1,x2,y2){ const dx=Math.max(40,Math.abs(x2-x1)*0.5);
+  return `M${x1},${y1} C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}`; }
+function render(){
+  const {nodes, edges} = g.get();
+  $('#stat').textContent = nodes.length+' nodes · '+edges.length+' edges'+(cycle()?' · CYCLE':'');
+  $('#stat').className = 'tag '+(cycle()?'bad':'');
+  const svg = hz.svg('svg',{style:'position:absolute;inset:0;width:100%;height:100%;pointer-events:none'});
+  edges.forEach(([a,b,port])=>{
+    const A = nodes.find(n=>n.id===a), B = nodes.find(n=>n.id===b);
+    if(!A||!B) return;
+    svg.append(hz.svg('path',{d: bez(A.x+168, A.y+34, B.x, B.y+34+port*18),
+      fill:'none', stroke: results[a]!==undefined?'#3ecf8e':'#5b8cff', 'stroke-opacity':.7, 'stroke-width':2}));
+  });
+  if(wire) svg.append(hz.svg('path',{d: bez(wire.x1,wire.y1,wire.x2,wire.y2),
+    fill:'none', stroke:'#f6b73c','stroke-width':2,'stroke-dasharray':'4 4'}));
+  fill(cvs, svg, nodes.map(n=>{
+    const T = TYPES[n.type];
+    const el = h('div',{style:{position:'absolute',left:n.x+'px',top:n.y+'px',width:'168px',
+      background:'var(--bg2)',border:'1px solid '+(results[n.id]!==undefined?'#3ecf8e':'var(--line2)'),
+      borderRadius:'9px',cursor:'grab',userSelect:'none',boxShadow:'var(--shadow)'}},
+      h('div',{style:{padding:'7px 10px',borderBottom:'1px solid var(--line)',
+        display:'flex',alignItems:'center',gap:'6px',fontSize:'12.5px',fontWeight:600}},
+        h('span',{style:{width:'8px',height:'8px',borderRadius:'50%',background:T.c}}), T.t,
+        h('span',{style:{marginLeft:'auto',cursor:'pointer',opacity:.6},
+          onclick:e=>{e.stopPropagation();
+            g.set(v=>({nodes:v.nodes.filter(x=>x.id!==n.id),
+              edges:v.edges.filter(([a,b])=>a!==n.id&&b!==n.id)})); render();}},'✕')),
+      h('div',{style:{padding:'8px 10px',fontSize:'11.5px',color:'var(--fg3)'}},
+        n.type==='fetch'? h('input',{value:n.path||'',placeholder:'/path',
+            style:{fontSize:'11px',padding:'3px 5px'},
+            onclick:e=>e.stopPropagation(),
+            oninput:e=>{ g.set(v=>({...v,nodes:v.nodes.map(x=>x.id===n.id?{...x,path:e.target.value}:x)})); }})
+        : n.type==='filter'? h('input',{value:n.match||'',placeholder:'contains…',
+            style:{fontSize:'11px',padding:'3px 5px'},
+            onclick:e=>e.stopPropagation(),
+            oninput:e=>{ g.set(v=>({...v,nodes:v.nodes.map(x=>x.id===n.id?{...x,match:e.target.value}:x)})); }})
+        : h('span', results[n.id]!==undefined? 'ran' : 'idle')));
+    // ports
+    for(let p=0;p<T.ins;p++) el.append(h('div',{'data-in':n.id,'data-port':p,
+      style:{position:'absolute',left:'-6px',top:(28+p*18)+'px',width:'12px',height:'12px',
+        borderRadius:'50%',background:'var(--bg3)',border:'2px solid var(--line2)'}}));
+    el.append(h('div',{'data-out':n.id,
+      style:{position:'absolute',right:'-6px',top:'28px',width:'12px',height:'12px',
+        borderRadius:'50%',background:T.c,cursor:'crosshair'}}));
+    el.addEventListener('pointerdown', e => {
+      if(e.target.dataset.out){ const r=cvs.getBoundingClientRect();
+        wire = {from:n.id, x1:n.x+168, y1:n.y+34, x2:e.clientX-r.left, y2:e.clientY-r.top}; return; }
+      if(e.target.tagName==='INPUT') return;
+      drag = {id:n.id, dx:e.clientX-n.x, dy:e.clientY-n.y};
+    });
+    return el;
+  }));
+}
+cvs.addEventListener('pointermove', e => {
+  const r = cvs.getBoundingClientRect();
+  if(drag){ g.set(v=>({...v, nodes:v.nodes.map(n=>n.id===drag.id?
+    {...n, x:Math.max(0,e.clientX-drag.dx), y:Math.max(0,e.clientY-drag.dy)}:n)})); render(); }
+  else if(wire){ wire.x2 = e.clientX-r.left; wire.y2 = e.clientY-r.top; render(); }
+});
+addEventListener('pointerup', e => {
+  if(wire){
+    const t = e.target.dataset;
+    if(t.in && t.in !== wire.from){
+      g.set(v=>({...v, edges:[...v.edges.filter(([a,b,p])=>!(b===t.in&&+p===+t.port)),
+        [wire.from, t.in, +t.port]]}));
+      toast('Connected');
+    }
+    wire=null; render();
+  }
+  drag=null;
+});
+function order(){
+  const {nodes, edges} = g.get();
+  const deg = Object.fromEntries(nodes.map(n=>[n.id,0]));
+  edges.forEach(([,b])=>deg[b]=(deg[b]||0)+1);
+  const q = nodes.filter(n=>!deg[n.id]).map(n=>n.id), out=[];
+  while(q.length){ const id=q.shift(); out.push(id);
+    edges.filter(([a])=>a===id).forEach(([,b])=>{ if(--deg[b]===0) q.push(b); }); }
+  return out;
+}
+const cycle = () => order().length !== g.get().nodes.length;
+async function run(){
+  if(cycle()) return toast('The graph has a cycle — remove an edge first');
+  results = {}; fill($('#log'));
+  const {nodes, edges} = g.get();
+  for(const id of order()){
+    const n = nodes.find(x=>x.id===id), T = TYPES[n.type];
+    const ins = Array.from({length:Math.max(1,T.ins)}, (_,p)=>{
+      const e = edges.find(([,b,po])=>b===id && +po===p); return e? results[e[0]] : undefined; });
+    const t0 = performance.now();
+    let out, err = null;
+    try { out = await T.run(ins, n); } catch(e){ err = e.message; out = {error:e.message}; }
+    results[id] = out;
+    $('#log').append(h('div.card.tight',{style:{marginBottom:'8px',
+      borderLeft:'3px solid '+(err?'var(--bad)':T.c)}},
+      h('div.row',h('span.b',T.t), h('span.spacer'),
+        h('span.small.muted', Math.round(performance.now()-t0)+' ms')),
+      h('pre',{style:{margin:'6px 0 0',fontSize:'11px',maxHeight:'120px',overflow:'auto'}},
+        JSON.stringify(out,null,2))));
+    render();
+    await new Promise(r=>setTimeout(r,160));
+  }
+  toast('Graph executed');
+}
+$('#run').onclick = run;
+$('#json').onclick = () => { const b=new Blob([JSON.stringify(g.get(),null,2)],{type:'application/json'});
+  h('a',{download:'flow.json',href:URL.createObjectURL(b)}).click(); };
+$('#reset').onclick = () => { g.set(structuredClone(SEED)); results={}; fill($('#log')); render(); toast('Graph reset'); };
+fill($('#palette'), Object.entries(TYPES).map(([k,T])=>h('button.sm',{onclick:()=>{
+  g.set(v=>({...v, nodes:[...v.nodes,{id:uid(), type:k, x:40+Math.random()*300, y:340+Math.random()*120}]}));
+  render(); }}, '+ '+T.t)));
+fill($('#log'), h('p.small.muted','Press Run. Nodes execute in topological order; the HTTP node performs a real same-origin request and the Base node creates a real record.'));
+render();
+</script>
