@@ -1,0 +1,77 @@
+{
+  "_": [
+    "The roster of NAMED AGENTS that build the Hanzo example products (HIP-903,",
+    "The Agentic Company). Each entry is an AI agent, named as one. There are no",
+    "human biographies here, no photographs, no employers, no invented credentials:",
+    "an agent that genuinely built the thing needs none of that, and inventing them",
+    "would make a true story into a false one.",
+    "",
+    "`profile` says what the agent is and what it works on. `avatar` is generated,",
+    "not photographed: a deterministic mark derived from the handle (kit/hz.js",
+    "hz.agentMark), so it is the same everywhere and asserts nothing untrue.",
+    "`hue` is the agent's accent, used only on its own byline — the PRODUCT's hue",
+    "owns the product's page."
+  ],
+  "agents": {
+    "atlas": {
+      "name": "Atlas",
+      "discipline": "Internal tools",
+      "hue": 214,
+      "profile": "Builds the software a company runs itself on: admin consoles, CRUD surfaces, directories and dashboards. Works from the data model outwards — decides what a row is, then what a screen is."
+    },
+    "solaris": {
+      "name": "Solaris",
+      "discipline": "Web & storefront",
+      "hue": 28,
+      "profile": "Builds the surfaces a stranger meets first: landing pages, storefronts, portfolios, editorial. Optimises for the first four seconds and for the reader who never scrolls."
+    },
+    "sage": {
+      "name": "Sage",
+      "discipline": "AI & retrieval",
+      "hue": 268,
+      "profile": "Builds chat, agents, retrieval and generation UIs. Treats a model as a component with latency and a failure mode, not as a magic box — every surface it ships shows its sources and its uncertainty."
+    },
+    "echo": {
+      "name": "Echo",
+      "discipline": "Realtime & collaboration",
+      "hue": 178,
+      "profile": "Builds anything where two people are in the same place at the same time: multiplayer canvases, calls, shared documents, presence. Designs for the moment the connection drops."
+    },
+    "iris": {
+      "name": "Iris",
+      "discipline": "Graphics & 3D",
+      "hue": 320,
+      "profile": "Builds with the GPU: WebGL and WebGPU scenes, canvas, terrain, particles, voxels. Cares about frame budget the way other agents care about bundle size."
+    },
+    "delta": {
+      "name": "Delta",
+      "discipline": "Data & developer tools",
+      "hue": 152,
+      "profile": "Builds the instruments: pipelines, query surfaces, diff and inspection tools, feature flags. Ships nothing that cannot be explained by pointing at the data."
+    },
+    "juno": {
+      "name": "Juno",
+      "discipline": "Commerce & money",
+      "hue": 8,
+      "profile": "Builds carts, checkouts, invoices, budgets and marketplaces. Holds one rule above all others: the number on the screen is the number that will be charged."
+    },
+    "kestrel": {
+      "name": "Kestrel",
+      "discipline": "Infrastructure & reliability",
+      "hue": 200,
+      "profile": "Builds the view from above: fleets, queues, status pages, uptime. Assumes the thing being watched is already on fire and asks what the operator needs in the first ten seconds."
+    },
+    "muse": {
+      "name": "Muse",
+      "discipline": "Content & publishing",
+      "hue": 44,
+      "profile": "Builds writing, reading and reference: CMSs, docs, handbooks, changelogs, courses. Defends the reading column against everything that wants to sit in it."
+    },
+    "nomad": {
+      "name": "Nomad",
+      "discipline": "Place & time",
+      "hue": 96,
+      "profile": "Builds maps, globes, calendars, schedules and timezones. Works in the two coordinate systems every other agent gets wrong."
+    }
+  }
+}

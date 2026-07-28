@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""verify.py — the quality gate. A published example counts ONLY if a real
+"""verify.py — the quality gate. A published PRODUCT counts ONLY if a real
 browser renders it: no page error, a non-trivial DOM under <main>, real visible
-text, and the first-party "Hanzo Example" badge actually visible on screen.
+text, and the "Hanzo product" badge actually visible on screen.
 
-Usage: verify.py [slug ...]   (default: every app in apps/)
+Usage: verify.py [slug ...]   (default: every product in products.json)
 """
 import concurrent.futures as cf
 import json
@@ -17,8 +17,11 @@ SHOT = os.path.join(ROOT, "shots")
 os.makedirs(SHOT, exist_ok=True)
 
 CHECK = """() => {
-  const m = document.querySelector('main');
-  const b = document.querySelector('.hz-official');
+  // A product's page may be composed by the kit shell (a <main>) or built by its
+  // parent template (which need not have one). Measure the page either way, or
+  // the gate reports a perfectly good template derivative as empty.
+  const m = document.querySelector('main') || document.body;
+  const b = document.querySelector('.hz-official, .hzb');
   const vis = e => { if(!e) return false; const r = e.getBoundingClientRect();
     return r.width > 8 && r.height > 8; };
   return {
@@ -73,8 +76,8 @@ def check(slug):
 
 
 def main():
-    names = sys.argv[1:] or sorted(f[:-5] for f in os.listdir(os.path.join(ROOT, "apps"))
-                                   if f.endswith(".html"))
+    names = sys.argv[1:] or [p["slug"] for p in json.load(
+        open(os.path.join(ROOT, "products.json")))["products"]] + ["examples"]
     rows = []
     with cf.ThreadPoolExecutor(6) as ex:
         for r in ex.map(check, names):
