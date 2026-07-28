@@ -112,7 +112,8 @@ brand. That is not hypothetical; it happened here, and this is the fix.
 visible Hanzo-product badge, and — for canvas products — measured pixel variance,
 because a canvas that renders a flat fill is a blank 200 with extra steps.
 
-Nothing here fabricates social proof: no star counts, no download counts, no
-testimonials. People in the demo data are placeholder names on generated
-avatars, addresses use the reserved `.invalid` domain, and every metric is
-generated from a fixed seed and says so on the page.
+Nothing here fabricates proof about Hanzo or its agents: no invented adoption
+numbers, no testimonials, no human credentials behind an agent. The *contents*
+of a demo are openly synthetic — placeholder names on generated avatars,
+`.invalid` addresses, seeded metrics, a storefront's ratings — and every page
+says so in its footer and in its manifest (`"syntheticData": true`).
