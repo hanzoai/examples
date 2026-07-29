@@ -1256,10 +1256,14 @@
  {
   "slug": "halcyon",
   "status": 200,
-  "ok": true,
-  "errs": [],
-  "nodes": 46,
-  "text": 689,
+  "ok": false,
+  "errs": [
+   "console:Failed to load resource: the server responded with a status of 404 ()",
+   "console:Failed to load resource: the server responded with a status of 404 ()",
+   "console:Failed to load resource: the server responded with a status of 404 ()"
+  ],
+  "nodes": 256,
+  "text": 1185,
   "badge": true,
   "canvas": false,
   "gl": null,

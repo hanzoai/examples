@@ -41,7 +41,13 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 # github.com/hanzo-templates/<slug>, so the baseline the diff is taken against
 # is the template's real HEAD, not a copy this script made up.
 TPL = os.environ.get("HZ_TEMPLATES", os.path.expanduser("~/.cache/work/tpl2"))
+# Where a built site lands, best first. `public/` is last and is ONLY a detection
+# candidate (a few templates ship a prebuilt demo there) — it is a SOURCE
+# directory for every framework template, which is why it is not in CLEAN_DIRS.
 BUILD_DIRS = ["out", "dist", "build", "_site", "public"]
+# What may be deleted before a build. Wiping `public/` here deleted the images
+# the template actually ships, and the export then 404'd on every one of them.
+CLEAN_DIRS = ["out", "dist", "build", "_site"]
 TEXT = {".html", ".css", ".js", ".mjs", ".json", ".svg", ".txt", ".xml",
         ".webmanifest", ".map", ".md", ".ico"}
 RUNTIME = ('<script src="https://a.hanzo.ai/analytics.js" data-org="hanzo" defer></script>\n'
@@ -117,7 +123,15 @@ def brand(d, p):
             if "output:" not in s:
                 s = re.sub(r"(nextConfig(?::\s*NextConfig)?\s*=\s*\{)",
                            r"\1\n  output: 'export',", s, count=1)
-                s = s.replace("images: {", "images: { unoptimized: true,", 1)
+            # next/image's optimizer is a SERVER. On a static host every <Image>
+            # becomes a /_next/image?url=… request that 404s, so a template that
+            # ships images without this is broken the moment it is exported.
+            if "unoptimized" not in s:
+                s = (s.replace("images: {", "images: { unoptimized: true,", 1)
+                     if "images: {" in s else
+                     re.sub(r"(nextConfig(?::\s*NextConfig)?\s*=\s*\{)",
+                            r"\1\n  images: { unoptimized: true },", s, count=1))
+            if s != open(f, encoding="utf-8").read():
                 open(f, "w", encoding="utf-8").write(s)
                 n += 1
             break
@@ -141,6 +155,13 @@ def brand(d, p):
                        r"(\s+hover:bg-(?:amber|orange|blue|indigo|violet|emerald|"
                        r"rose|red|green|purple|sky|teal|cyan)-(?:600|700))",
                        "bg-primary hover:bg-primary/90", s)
+            # An asset path the repo never shipped is a 404 with a brand on it.
+            # Point the reference at a generated placeholder instead of pretending
+            # the file exists.
+            s = re.sub(r"([\"'])(/(?:images|img|assets)/[^\"']+\.(?:jpg|jpeg|png|svg|webp))\1",
+                       lambda m: m.group(1) + (m.group(2) if os.path.exists(
+                           os.path.join(d, "public", m.group(2).lstrip("/")))
+                           else placeholder(hue, 640, 640)) + m.group(1), s)
             # Every one of these templates ships the same placeholder subtitle,
             # in half a dozen phrasings. A product says what IT is.
             s = re.sub(r"[A-Z][^\"'<>{}]*?built with @hanzo/ui components",
@@ -178,7 +199,7 @@ def buildsite(d):
     directory exists: `out/` is gitignored, so it survives `git clean` from the
     previous run, and trusting its presence is exactly how a failed build ships
     yesterday's bytes under today's brand."""
-    for c in BUILD_DIRS:  # never inherit a stale build
+    for c in CLEAN_DIRS:  # never inherit a stale build
         shutil.rmtree(os.path.join(d, c), ignore_errors=True)
     r = subprocess.run(["npm", "run", "build"], cwd=d, capture_output=True,
                        text=True, timeout=900)

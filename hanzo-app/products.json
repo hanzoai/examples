@@ -112,7 +112,20 @@
      "Chat"
     ]
    ],
-   "desc": "Assistant chat shell: multi-conversation sidebar, streaming token rendering, markdown and code blocks with copy, stop generation, regenerate, model and temperature controls and message export."
+   "desc": "Assistant chat shell: multi-conversation sidebar, streaming token rendering, markdown and code blocks with copy, stop generation, regenerate, model and temperature controls and message export.",
+   "derive": {
+    "repo": "synapse",
+    "replace": [
+     [
+      "Brainwave",
+      "Halcyon"
+     ],
+     [
+      "AI UI Kit",
+      "a calm assistant"
+     ]
+    ]
+   }
   },
   {
    "slug": "timeslot",

@@ -131,6 +131,11 @@ D = {
  "marginalia": {"repo": "markdown-editor", "replace": [
    ["Markdown Editor", "Marginalia"],
    ["Edit Only", "Write"], ["Split View", "Side by side"], ["Preview Only", "Read"]]},
+ # synapse still carries the upstream vendor's brand ("Brainwave") in 26 files.
+ # Rebranding it to the product is both the agent's edit and the removal of a
+ # third-party name from a Hanzo template.
+ "halcyon": {"repo": "synapse", "replace": [
+   ["Brainwave", "Halcyon"], ["AI UI Kit", "a calm assistant"]]},
  "reel": {"repo": "video-streaming", "replace": [
    ["Related Videos", "Up next"],
    ["Advanced React Patterns", "How a static host serves 74 products"],
