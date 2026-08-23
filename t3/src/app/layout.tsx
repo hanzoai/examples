@@ -1,6 +1,9 @@
+// Zen — the one family. @hanzo/design ships the two variable faces and declares
+// their @font-face, so the app names no face and reads the family through the
+// role tokens --font-sans / --font-mono. Nothing to attach to <html>.
+import "@hanzo/design/tokens/fonts.css";
 import "@/styles/globals.css";
 
-import { GeistSans } from "geist/font/sans";
 import { type Metadata } from "next";
 
 import { TRPCReactProvider } from "@/trpc/react";
@@ -15,7 +18,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${GeistSans.variable}`}>
+    <html lang="en">
       <body>
         <TRPCReactProvider>{children}</TRPCReactProvider>
       </body>
