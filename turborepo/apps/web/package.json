@@ -11,7 +11,7 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "@hanzo/design": "^0.5.21",
+    "@hanzo/design": "0.5.24",
     "@repo/ui": "workspace:*",
     "next": "^15.2.1",
     "react": "^19.0.0",
