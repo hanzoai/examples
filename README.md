@@ -2,6 +2,8 @@
 
 # Dokploy Examples
 
+[![Open in Hanzo](https://hanzo.app/badges/open-in-hanzo.svg)](https://hanzo.app/dev/open?repo=github.com/hanzoai/examples&ref=main&action=open) [![Edit with Hanzo](https://hanzo.app/badges/edit-with-hanzo.svg)](https://hanzo.app/dev/open?repo=github.com/hanzoai/examples&ref=main&action=edit)
+
 ---
 This repository contains examples of how to deploy applications using Dokploy.
 - [x] 11ty
